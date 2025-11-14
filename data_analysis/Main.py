@@ -9,6 +9,11 @@ def main():
     curves = curve_detector.calcolo_curve()
     for i in range(0 , len(curves)):
         curves[i].print();
+        curves[i].plot_controls()              # speed / throttle / brake vs distanza
+        curves[i].plot_controls(use_time=True) # stessa cosa ma vs tempo
+        curves[i].plot_trajectory_speed()      # XY colorato per speed
+        curves[i].plot_curvature()             # κ(s)
+        curves[i].plot_gg_diagram() 
     
     curve_detector.grafico(curves,False)
     curve_detector.plot_curve_trajectories(curves)

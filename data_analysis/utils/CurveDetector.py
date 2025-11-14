@@ -151,11 +151,11 @@ class CurveDetector:
 
                         # se la curva inizia troppo lontano dall'apice → avvicino lo start
                         if distance_from_start > MARGIN_BEFORE:
-                            curve_start_idx = pilot_apex - MARGIN_BEFORE + 10
+                            curve_start_idx = pilot_apex - MARGIN_BEFORE
 
                         # se la curva finisce troppo lontano dall'apice → avvicino l'end
                         if distance_from_end > MARGIN_AFTER:
-                            curve_end_idx = pilot_apex + MARGIN_AFTER - 10
+                            curve_end_idx = pilot_apex + MARGIN_AFTER 
 
                             
 
