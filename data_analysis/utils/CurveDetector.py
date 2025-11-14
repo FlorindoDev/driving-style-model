@@ -9,6 +9,7 @@ class CurveDetector:
     ACC_EXIT_THR_DEFAULT  = 2.5    # esci se |acc_y| < di questo (leggermente più basso = isteresi)
     SMOOTH_WIN_DEFAULT    = 3      # smoothing su acc_y
     MIN_SAMPLES_IN_CURVE_DEFAULT = 5   # minimo punti per dire che è davvero curva
+    MAX_SAMPLES_IN_CURVE_DEFAULT = 25 # grandezza massima curva
     # ===================================================================
 
     def __init__(
@@ -19,6 +20,7 @@ class CurveDetector:
         acc_exit_thr: float = None,
         smooth_win: int = None,
         min_samples_in_curve: int = None,
+        max_samples_in_curve: int = None,
     ):
        
         self.ACC_ENTER_THR = acc_enter_thr if acc_enter_thr is not None else self.ACC_ENTER_THR_DEFAULT
@@ -26,6 +28,9 @@ class CurveDetector:
         self.SMOOTH_WIN    = smooth_win    if smooth_win    is not None else self.SMOOTH_WIN_DEFAULT
         self.MIN_SAMPLES_IN_CURVE = (
             min_samples_in_curve if min_samples_in_curve is not None else self.MIN_SAMPLES_IN_CURVE_DEFAULT
+        )
+        self.MAX_SAMPLES_IN_CURVE = (
+            max_samples_in_curve if max_samples_in_curve is not None else self.MAX_SAMPLES_IN_CURVE_DEFAULT
         )
 
         # --- 1) carico telemetria ---
@@ -67,7 +72,7 @@ class CurveDetector:
 
     def getBounds(self, curve_number, apex_point, prev_apex, next_apex, n_corners):
         DEFAULT_FIRST_DISTANCE_CURVE = 150
-        DEFAULT_LAST_DISTANCE_CURVE = 100
+        DEFAULT_LAST_DISTANCE_CURVE = 250
 
         if curve_number == 0:
             lower_bound = apex_point - DEFAULT_FIRST_DISTANCE_CURVE
@@ -130,9 +135,29 @@ class CurveDetector:
 
             curve_start_idx, curve_end_idx = self.getCurveWindow(start_win_idx, end_win_idx, i)
 
-            # salvo solo se ho trovato qualcosa di sensato
+
             if curve_start_idx is not None and curve_end_idx is not None:
-                if (curve_end_idx - curve_start_idx + 1) >= self.MIN_SAMPLES_IN_CURVE:
+                lenght_curve = curve_end_idx - curve_start_idx + 1
+                if lenght_curve >= self.MIN_SAMPLES_IN_CURVE:
+                  
+                    if lenght_curve > self.MAX_SAMPLES_IN_CURVE:
+                        pilot_apex = find_frist_value(self.tel_dist, self.corner_distances[i])
+
+                        distance_from_start = pilot_apex - curve_start_idx
+                        distance_from_end   = curve_end_idx - pilot_apex
+
+                        MARGIN_BEFORE = 20   
+                        MARGIN_AFTER  = 20   
+
+                        # se la curva inizia troppo lontano dall'apice → avvicino lo start
+                        if distance_from_start > MARGIN_BEFORE:
+                            curve_start_idx = pilot_apex - MARGIN_BEFORE + 10
+
+                        # se la curva finisce troppo lontano dall'apice → avvicino l'end
+                        if distance_from_end > MARGIN_AFTER:
+                            curve_end_idx = pilot_apex + MARGIN_AFTER - 10
+
+                            
 
                     curve = Curve(
                         corner_id=self.corner_numbers[i],
@@ -157,8 +182,8 @@ class CurveDetector:
 
         return detected_corners
 
-    def grafico(self, detected_corners):
-        # --- GRAFICO ---
+    def grafico(self, detected_corners, block=True):
+     
         fig, ax1 = plt.subplots(figsize=(12, 5))
 
         # acc_y
@@ -195,10 +220,62 @@ class CurveDetector:
 
         ax1.set_title("Raffinamento curve con finestra per distanza")
         fig.tight_layout()
-        plt.show()
+        plt.show(block=block)
+
+    def plot_curve_trajectories(self, detected_corners, show_apex=True, block=True):
+        """
+        Disegna la traiettoria XY del giro completo e, sopra,
+        evidenzia per ogni curva il tratto effettivo percorso dal pilota.
+
+        Parametri
+        ----------
+        detected_corners : list[Curve]
+            Lista di oggetti Curve restituiti da calcolo_curve().
+        show_apex : bool
+            Se True, marca anche il punto dell'apice per ogni curva.
+        """
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Disegno l'intero giro in grigio chiaro
+        ax.plot(self.x, self.y, linewidth=1, alpha=0.3, label="Giro completo")
+
+        # Per ogni curva, evidenzio la traiettoria dentro la curva
+        for c in detected_corners:
+
+            # Traiettoria effettiva nella curva (già slice dell'intera telemetria)
+            ax.plot(c.x, c.y, linewidth=2, label=f"Curva {c.corner_id}")
+
+            if show_apex:
+                # Provo a trovare l'indice dell'apice dentro la curva
+                # usando la distanza lungo il giro
+                try:
+                    apex_idx_local = find_frist_value(c.distance, c.apex_dist)
+                    apex_x = c.x[apex_idx_local]
+                    apex_y = c.y[apex_idx_local]
+
+                    ax.scatter(apex_x, apex_y, s=40, marker="x", color="red")
+                    ax.text(
+                        apex_x,
+                        apex_y,
+                        f"{c.corner_id}",
+                        fontsize=8,
+                        color="red",
+                        ha="left",
+                        va="bottom",
+                    )
+                except Exception:
+                    # Se qualcosa va storto, semplicemente non disegno il marker
+                    pass
+
+        ax.set_xlabel("X (m)")
+        ax.set_ylabel("Y (m)")
+        ax.set_title("Traiettoria in curva (XY)")
+
+        # Scala uguale sugli assi per non deformare la pista
+        ax.set_aspect("equal", adjustable="box")
 
 
-# Esempio d'uso:
-# detector = CurveDetector("18_tel.json", "corners_S.json")
-# curves = detector.calcolo_curve()
-# detector.grafico(curves)
+        plt.tight_layout()
+        plt.show(block=block)
+
+
