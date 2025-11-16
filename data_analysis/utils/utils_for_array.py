@@ -18,7 +18,6 @@ def find_closest_value(array, value):
     array = np.asarray(array)
     return np.abs(array - value).argmin()
 
-
 def find_last_value(array, value):
     #ultimo indice dove array[i] <= value
     last = 0

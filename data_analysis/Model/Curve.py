@@ -2,7 +2,7 @@ import math
 from typing import List
 import numpy as np
 import matplotlib.pyplot as plt
-from utils.utils_for_array import find_frist_value
+from utils.utils_for_array import find_closest_value
 
 class Curve:
     def __init__(
@@ -76,15 +76,14 @@ class Curve:
     def speed_average(self) -> float:
         return sum(self.speed) / len(self.speed) 
 
-    def entry_speed_average(self, fraction: float = 0.10) -> float:
-        amount = max(1, int(len(self.speed) * fraction))
-        find_frist_value()
-        entry_speeds = self.speed[:amount]
+    def entry_speed_average(self) -> float:
+        apex_pilot_idx = find_closest_value(self.distance, self.apex_dist)
+        entry_speeds = self.speed[:apex_pilot_idx]
         return sum(entry_speeds) / len(entry_speeds) 
 
-    def exit_speed_average(self, fraction: float = 0.10) -> float:
-        amount = max(1, int(len(self.speed) * fraction))
-        exit_speeds = self.speed[-amount:]
+    def exit_speed_average(self) -> float:
+        apex_pilot_idx = find_closest_value(self.distance, self.apex_dist)
+        exit_speeds = self.speed[apex_pilot_idx:]
         return sum(exit_speeds) / len(exit_speeds) 
     
     def apex_speed(self) -> float:
@@ -254,20 +253,61 @@ class Curve:
         brake è binario (0/1), quindi l'intensità della frenata
         la leggiamo da acc_x, non dal valore del pedale.
         """
+
         thr = self._normalize_pedal(self.throttle)
 
         if not self.time or not thr:
             return 0.0
 
-        ax_min = min(self.acc_x)         
-        dec_peak = max(-ax_min, 0.0)  #quanto forte freni (fisicamente: G di decelerazione)
+        t  = np.asarray(self.time, float)
+        ax = np.asarray(self.acc_x, float)
 
-    
-        dthr_dt = np.diff(thr) / np.diff(self.time) #formula derivata
+        dec_peak = max(-np.min(ax), 0.0)   
 
-        max_dthr = np.max(np.abs(dthr_dt)) if len(dthr_dt) > 0 else 0.0 #quanto sei brusco nel cambiare gas (derivata del throttle)
+   
+        dthr_dt = np.diff(thr) / np.diff(t)
+        dt      = np.diff(t)
 
-        return dec_peak * (1.0 + max_dthr)
+        if len(dthr_dt) == 0:
+            return 0.0
+
+        abs_d = np.abs(dthr_dt)
+
+       
+        max_d = float(abs_d.max())
+        if max_d < 1e-6:
+            mean_abs_d = 0.0
+        else:
+            # prendo i punti con derivata almeno al 20% del massimo di quella curva
+            DERIV_REL = 0.2  
+            thr_val = DERIV_REL * max_d
+
+            abs_d_filtered = abs_d[abs_d >= thr_val]
+            dt_filtered    = dt[abs_d >= thr_val]
+
+            # se per qualche motivo rimane vuoto, fallback alla media normale
+            if len(abs_d_filtered) == 0:
+                mean_abs_d = float(np.sum(abs_d * dt) / (t[-1] - t[0]))
+            else:
+                mean_abs_d = float(np.sum(abs_d_filtered * dt_filtered) / np.sum(dt_filtered))
+
+   
+        DEC_MAX = 60.0
+        dec_norm = min(dec_peak / DEC_MAX, 1.0)
+
+        # da tarare con dati reali questo perchè il tempo di risposta biologiva massimo di 0,2 quindi 1/0,2 = 5 
+        # quindi la derivata del intervallo massimo dell accleatore fratto il tempo minimo di reazione
+        MEAN_D_MAX = 2
+        gas_norm = min(mean_abs_d / MEAN_D_MAX, 1.0)
+
+        # Aggressività combinata o solo gas se non freni
+        if dec_norm != 0:
+            aggr_norm = dec_norm * gas_norm
+        else:
+            aggr_norm = gas_norm
+
+        return aggr_norm
+
 
     def fluidity(self) -> float:
         """
@@ -305,7 +345,7 @@ class Curve:
 
 
 
-    def efficiency(self, fraction: float = 0.10) -> float:
+    def efficiency(self) -> float:
         """
         Efficienza accelerativa:
         (v_out^2 - v_in^2) / dt_curva
@@ -323,12 +363,9 @@ class Curve:
         if dt <= 0 or not self.speed:
             return 0.0
 
-        spd = np.asarray(self.speed, dtype=float)
-        n = len(spd)
-        amount = max(1, int(n * fraction))
 
-        v_in  = float(spd[:amount].mean())
-        v_out = float(spd[-amount:].mean())
+        v_in  = self.entry_speed_average()
+        v_out = self.exit_speed_average()
 
         return (v_out**2 - v_in**2) / dt
 
@@ -373,7 +410,13 @@ class Curve:
         # per evitare problemi di divisione per zero
         eps = 1e-6
         energy_in_safe = energy_in if abs(energy_in) > eps else eps
-        brake_ratio = energy_loss / energy_in_safe  # quanta energia butti via in frenata, è una probabilità quanta energia perso sul totale che avevo
+        den = energy_loss + energy_in_safe
+
+        if den < eps:
+            brake_ratio = 0.0
+        else:
+            brake_ratio = energy_loss / den  # quanta energia butti via in frenata, è una precentuale quanta energia perso sul totale che avevo
+        
 
         # 1) OVERDRIVE: tanto instabile + molto aggressivo + efficienza negativa
         if stability > 0.38 and aggressiveness > 18 and efficiency < 0 and brake_ratio > 0.8:
@@ -507,9 +550,9 @@ class Curve:
         idx_in_end = amount
         idx_out_start = n - amount
 
-        v_in = float(spd[:amount].mean())
-        v_out = float(spd[-amount:].mean())
-        eff = self.efficiency(fraction=fraction)
+        v_in = self.entry_speed_average()
+        v_out = self.exit_speed_average()
+        eff = self.efficiency()
 
         x = np.asarray(self.time if use_time else self.distance, dtype=float)
         x_label = "Tempo [s]" if use_time else "Distanza [m]"
