@@ -3,6 +3,7 @@ from typing import List
 import numpy as np
 import matplotlib.pyplot as plt
 from utils.utils_for_array import find_closest_value
+from scipy.signal import savgol_filter
 
 class Curve:
     def __init__(
@@ -42,6 +43,11 @@ class Curve:
         self.z = z
 
 
+
+    #########################################################
+    #                   Metodi privati                      #
+    #########################################################
+
     def _normalize_pedal(self, pedal: List[float]) -> List[float]:
         """
         Porta throttle / brake a ~[0,1].
@@ -55,6 +61,43 @@ class Curve:
         if maxv > 1.5:
             return [p / 100.0 for p in pedal]
         return pedal[:]  
+
+    def _savgol_1d(self, data: List[float], window: int = 11, poly: int = 3) -> np.ndarray:
+        """
+        Applica il filtro Savitzky–Golay per rendere il segnale più liscio
+        senza alterarne la forma originale.
+
+        Il filtro funziona così:
+        - prende una finestra di punti attorno ad ogni campione
+        - ci "fitta" sopra una piccola curva (polinomio di grado `poly`)
+        - sostituisce il punto centrale con il valore della curva liscia
+
+        Otteniamo:
+        - riduce il rumore
+        - mantiene intatta la forma del segnale (picchi, pendenze, curvature)
+        - è molto migliore della media mobile perché non appiattisce la curva.
+
+        Params:
+        - `window` deve essere dispari (es. 7, 9, 11, ...)
+        - `poly` indica quanto complessa può essere la curva locale 
+        """
+        arr = np.asarray(data, float)
+
+        n = len(arr)
+        if n < 3:
+            return arr
+
+        # aggiusta window se è troppo lungo o pari
+        if window > n:
+            window = n
+        if window % 2 == 0:
+            window -= 1
+        if window < poly + 2:
+            # troppo pochi punti per un fit decente
+            return arr
+
+        return savgol_filter(arr, window_length=window, polyorder=poly, mode="interp")
+
 
     def print(self):
         print(f"[!] apex:{self.apex_dist}; start: {self.distance[0]} -> end: {self.distance[-1]}")
@@ -156,48 +199,60 @@ class Curve:
     #########################################################
 
 
-    def curvature_profile(self) -> List[float]:
+    def curvature_profile(self, smooth_xy: bool = True, smooth_kappa: bool = True) -> List[float]:
         """
         Restituisce una lista kappa[k] (stessa lunghezza di x/y)
-        calcolando il raggio di un cerchio passante su 3 punti:
-        P1 = (x[k-1], y[k-1]), P2 = (x[k], y[k]), P3 = (x[k+1], y[k+1])
+        calcolando la curvatura come 1/R del cerchio circoscritto
+        a tre punti (k-5, k, k+5).
+
+        Usa Savitzky–Golay per:
+        - filtrare x,y (prima del calcolo della curvatura)
+        - opzionalmente filtrare anche kappa alla fine
         """
+
         n = len(self.x)
         if n < 3:
             return [0.0] * n
 
-        kappa = [0.0] * n  
+        x = np.asarray(self.x, float)
+        y = np.asarray(self.y, float)
 
-        # 3 poiché punti troppo vicini una piccola varianzione puo creare dei spike nel grafico
-        for k in range(5, n - 5):
-            x1, y1 = self.x[k - 5], self.y[k - 5]
-            x2, y2 = self.x[k],     self.y[k]
-            x3, y3 = self.x[k + 5], self.y[k + 5]
 
+        if smooth_xy:
+            x = self._savgol_1d(x, window=11, poly=3)
+            y = self._savgol_1d(y, window=11, poly=3)
+
+        kappa = np.zeros(n, dtype=float)
+
+        offset = 5  # distanza tra i 3 punti usati
+        for k in range(offset, n - offset):
+            x1, y1 = x[k - offset], y[k - offset]
+            x2, y2 = x[k],         y[k]
+            x3, y3 = x[k + offset], y[k + offset]
+
+            # lati del triangolo
             a = math.hypot(x3 - x2, y3 - y2)
             b = math.hypot(x3 - x1, y3 - y1)
             c = math.hypot(x2 - x1, y2 - y1)
 
+            # area del triangolo (determinante)
             area = 0.5 * abs(
                 (x2 - x1) * (y3 - y1) -
                 (y2 - y1) * (x3 - x1)
             )
 
-            # Se i punti sono quasi allineati o troppo vicini, curvatura = 0
             if area < 1e-9 or a == 0.0 or b == 0.0 or c == 0.0:
                 kappa[k] = 0.0
                 continue
 
-            # formula Raggio del cerchio circoscritto fra tre punti
             R = (a * b * c) / (4.0 * area)
-
-            # Curvatura = 1 / R 
-            # Per R grande e più la Curvatura sarà piccola 
-            # più R è piccolo più stretta sarà la curva 
             kappa[k] = 1.0 / R
 
-  
-        return kappa
+       
+        if smooth_kappa:
+            kappa = self._savgol_1d(kappa, window=11, poly=3)
+
+        return kappa.tolist()
 
     def curvature_mean(self) -> float:
         """
@@ -330,9 +385,10 @@ class Curve:
         thr = thr[:n]
         ax  = ax[:n]
 
-        # dt tra campioni consecutivi
+
         dt = np.diff(t)
-        # filtro dt non validi
+
+        # filtro dt non validi, array dove ogni posizione è vera o falsa
         valid = dt > 1e-6
         if not np.any(valid):
             return 0.0
@@ -344,21 +400,23 @@ class Curve:
         mean_abs_dthr_dt = float(np.mean(np.abs(dthr_dt)))
         mean_abs_dax_dt  = float(np.mean(np.abs(dax_dt)))
 
-        # --- Costanti di riferimento (da tarare ma con significato chiaro) ---
-        # MAX_DTHR: es. 2.0 → cambio gas 0→1 in 0.5 s (1 / 0.5 = 2)
-        MAX_DTHR = 2.0    # [unità gas] per secondo
-        # MAX_DAX: es. 2.0 → cambi di 2 g/s considerati "molto nervosi"
-        MAX_DAX  = 2.0    # [g] per secondo
+
+        # MAX_DTHR: es. 5.0 → cambio gas 0→1 in 0.2 s (1 / 0.2 = 5)
+        MAX_DTHR = 5.0    # [unità gas] per secondo
+        # MAX_DAX: es. 3.0 → cambi di 5 g/s considerati "molto nervosi"
+        MAX_DAX  = 3.0    # [g] per secondo
 
         # Nervosità normalizzata in [0,1]
         nerv_thr = min(mean_abs_dthr_dt / MAX_DTHR, 1.0)
         nerv_ax  = min(mean_abs_dax_dt  / MAX_DAX,  1.0)
 
-        # media pesata della nervosità (puoi cambiare i pesi se vuoi)
+        # media pesata della nervosità 
         mean_nerv = 0.5 * nerv_thr + 0.5 * nerv_ax
 
         # Fluidità = opposto della nervosità
         fluidity = 1.0 - mean_nerv
+
+
         # safety clamp
         return float(max(0.0, min(1.0, fluidity)))
 
@@ -388,29 +446,150 @@ class Curve:
         return (v_out**2 - v_in**2) / dt
 
 
-    def stability(self) -> float:
+    def vehicle_stability(self) -> float:
         """
-        Stabilità laterale:
-        std(|acc_y|) / max(|acc_y|)
+        Plot del Vehicle Stability Index (VSI).
 
-        Misura quanto la forza laterale oscilla rispetto al suo livello massimo(normalizzata per max(|acc_y|)).
-        La normalizzazione con max(|acc_y|) rende il valore comparabile tra curve
-        di intensità diversa: a parità di oscillazioni, una curva dolce è meno
-        stabile di una curva stretta. Valori bassi = curva fluida e stabile.
+        Pannello superiore:
+        - ay misurata vs ay attesa (v²·κ).
+        Se coincidono ⇒ veicolo stabile (comportamento ideale).
+
+        Pannello inferiore:
+        - |ay - ay_attesa| e sua media.
+        Questo errore medio è la base del VSI.
+
+        VSI ∈ [0,1]:
+        - alto  ⇒ stabile / coerente con la fisica
+        - basso   ⇒ instabile / slip o sovra/sottosterzo
         """
-        if not self.acc_y:
+
+        kappa = self.curvature_profile()
+
+        if not kappa or not self.speed or not self.acc_y:
             return 0.0
 
-        ay = np.asarray(self.acc_y, dtype=float)
-        ay_abs = np.abs(ay)
+        kappa = np.asarray(kappa, float)
+        v     = np.asarray(self.speed, float)
+        ay    = np.asarray(self.acc_y, float)
 
-        ay_max = float(ay_abs.max())
-        if ay_max <= 0:
+        n = min(len(kappa), len(v), len(ay))
+        if n < 5:
             return 0.0
 
-        std_ay = float(ay_abs.std())   # np.std
+        kappa = kappa[:n]
+        v     = v[:n]
+        ay    = ay[:n]
 
-        return std_ay / ay_max
+        v2 = v * v 
+
+        ay_expected = v2 * kappa   #Formula fisica fondamentale del moto circolare. acc_y per quella curvatura
+
+ 
+        delta_ay = np.abs(ay - ay_expected) #differenza tra quella attessa e quella reale 
+
+        mean_delta = float(np.mean(delta_ay))
+
+        max_ay = 58 #acc_y massima teorica
+
+  
+        vsi = 1 - (mean_delta / max_ay)
+
+        return vsi
+
+    def trail_braking_index(self) -> float:
+        """
+        Trail Braking Index (TBI) in [0,1].
+
+        Misura quanto il pilota frena mentre la vettura è già in appoggio,
+        cioè mentre sta generando accelerazione laterale (acc_y).
+
+        Interpretazione:
+        - 0.0 = frena solo sul dritto (nessuna frenata mentre è in curva)
+        - 1.0 = frena per tutta la durata dell'appoggio laterale
+                (trail braking molto aggressivo)
+
+        Formula:
+            TBI = ( ∫ brk(t) * |acc_y(t)| dt ) / ( ∫ |acc_y(t)| dt )
+
+        Significato dei termini:
+        - |acc_y(t)| misura quanto la vettura sta realmente curvando in ogni istante.
+        - brk(t) è 1 quando frena e 0 quando non frena.
+        - brk(t) * |acc_y(t)| pesa solo le parti di curva in cui si frena
+        mentre c’è appoggio laterale.
+        - Il denominatore normalizza il risultato rispetto all'appoggio totale
+        della curva, rendendo il valore una percentuale
+
+        In pratica:
+        - Numeratore   = quanta frenata avviene "dentro" la curva.
+        - Denominatore = quanta curva c’è in totale.
+        - TBI          = percentuale della curva percorsa frenando in appoggio.
+        """
+
+        if not self.time or not self.acc_y or not self.brake:
+            return 0.0
+
+        t   = np.asarray(self.time, float)
+        ay  = np.asarray(self.acc_y, float)
+        brk = np.asarray(self.brake, float)
+
+        n = min(len(t), len(ay), len(brk))
+        if n < 2:
+            return 0.0
+
+        t   = t[:n]
+        ay  = ay[:n]
+        brk = brk[:n]
+
+        dt = np.diff(t)
+        
+
+        ay_abs = np.abs(ay[1:])
+
+        num = float(np.sum(brk[1:] * ay_abs * dt))
+        den = float(np.sum(ay_abs * dt))
+
+        if den <= 1e-9:
+            return 0.0
+
+        return num / den
+
+
+    def grip_usage(self, max_g: float = 3.0) -> float:
+        """
+        Grip Usage Index (GUI) in [0,1].
+
+        Calcola il G combinato:
+            g_tot = sqrt((acc_x/g)^2 + (acc_y/g)^2)
+
+        acc_x/g e acc_y/g rappresentano le forze longitudinali e laterali
+        in unità di "g". g_tot è quindi la forza totale richiesta alle gomme
+        in quell'istante (friction circle). Quindi e la richesta di grip del pilotà
+
+        Ritorna:
+            mean(g_tot) / max_g   (clampato in [0,1])
+        """
+
+        if not self.acc_x or not self.acc_y:
+            return 0.0
+
+        ax = np.asarray(self.acc_x, float) / 9.81
+        ay = np.asarray(self.acc_y, float) / 9.81
+
+        n = min(len(ax), len(ay))
+        if n == 0:
+            return 0.0
+
+        ax = ax[:n]
+        ay = ay[:n]
+
+        g_tot = np.sqrt(ax * ax + ay * ay)
+        mean_g = float(np.mean(g_tot))
+
+        if max_g <= 1e-6:
+            return 0.0
+
+        return float(max(0.0, min(mean_g / max_g, 1.0)))
+
 
     #########################################################
     #                 Calcolo Stile di guida                #
@@ -418,46 +597,61 @@ class Curve:
 
     @staticmethod
     def classify_driver_style(curve: "Curve") -> str:
-        stability       = curve.stability()
-        aggressiveness  = curve.aggressiveness()
-        fluidity        = curve.fluidity()           # supponiamo già "aggiustata"
-        energy_in       = curve.energy_input()
-        energy_loss     = curve.energy_lost_brake()
-        efficiency      = curve.efficiency()
+        """
+        Classifica la curva in 3 stili:
+        - aggressivo
+        - medio
+        - gestione
 
-        # per evitare problemi di divisione per zero
+        Usa tutte le metriche:
+        stability, aggressiveness, fluidity, grip_usage,
+        trail_braking, energy_in, energy_lost_brake.
+        """
+
+        # --- metriche ---
+        stability      = curve.vehicle_stability()      # 1 = stabile, 0 = instabile
+        aggressiveness = curve.aggressiveness()         # 0..1
+        fluidity       = curve.fluidity()               # 0 = nervoso, 1 = fluido
+        energy_in      = curve.energy_input()
+        energy_loss    = curve.energy_lost_brake()
+        tbi            = curve.trail_braking_index()    # 0..1
+        gui            = curve.grip_usage()             # 0..1
+
+        # rapporto energia persa / totale
         eps = 1e-6
-        energy_in_safe = energy_in if abs(energy_in) > eps else eps
-        den = energy_loss + energy_in_safe
+        energy_in_safe = max(energy_in, eps)
+        brake_ratio = energy_loss / (energy_in_safe + energy_loss + eps)
 
-        if den < eps:
-            brake_ratio = 0.0
-        else:
-            brake_ratio = energy_loss / den  # quanta energia butti via in frenata, è una precentuale quanta energia perso sul totale che avevo
-        
+        # pulizia (fluido + stabile)
+        cleanliness = 0.5*stability + 0.5*fluidity
+        cleanliness = max(0.0, min(1.0, cleanliness))
 
-        # 1) OVERDRIVE: tanto instabile + molto aggressivo + efficienza negativa
-        if stability > 0.38 and aggressiveness > 18 and efficiency < 0 and brake_ratio > 0.8:
-            return "overdrive"
+        # attacco/aggressività reale
+        attack_raw = (
+            0.40 * aggressiveness +
+            0.25 * gui +
+            0.20 * tbi +
+            0.15 * brake_ratio
+        )
+        attack = max(0.0, min(1.0, attack_raw))
 
-        # 2) SPORCO / INSTABILE: instabilità alta o fluidità molto bassa
-        if stability > 0.30 or fluidity < 0.3:
-            return "sporco / instabile"
+        # ---------------- Soglie per i 3 stili ----------------
+        # Tarate per far sì che un giro di qualifica risulti più spesso "aggressivo".
+        ATTACK_HIGH = 0.45   # sopra → aggressivo
+        ATTACK_LOW  = 0.25   # sotto → gestione
 
-        # 3) AGGRESSIVO: freni forte o butti via tanta energia in frenata
-        if aggressiveness > 15 or brake_ratio > 0.6:
+        # ---------------- Classificazione ----------------
+
+        if attack >= ATTACK_HIGH:
             return "aggressivo"
 
-        # 4) FLUIDO: stabile, fluido, non troppo aggressivo
-        if stability < 0.22 and fluidity > 0.6 and aggressiveness < 12:
-            return "fluido"
+        if attack <= ATTACK_LOW:
+            return "gestione"
 
-        # 5) CONSERVATIVO: spinge poco e non è aggressivo
-        if energy_in < 0.4 * energy_loss and aggressiveness < 8 and efficiency >= 0:
-            return "conservativo"
+        return "medio"
 
-        # 6) NEUTRO
-        return "neutro"
+
+
 
 
 
@@ -481,7 +675,7 @@ class Curve:
 
         plt.figure()
         sc = plt.scatter(x, y, c=spd)
-        plt.colorbar(sc, label="Speed")
+        plt.colorbar(sc, label="Speed [m/s]")
         plt.xlabel("X [m]")
         plt.ylabel("Y [m]")
         plt.title(f"Corner {self.corner_id} – Traiettoria colorata per velocità")
@@ -489,72 +683,124 @@ class Curve:
         plt.tight_layout()
         plt.show()
 
+    def plot_vehicle_stability(self):
+        """
+        Disegna i grafici per il Vehicle Stability Index (VSI):
+
+        - sopra: accelerazione laterale misurata vs attesa (v^2 * kappa)
+        - sotto: |delta_ay| e sua media
+
+        Nel titolo mostra anche il valore VSI aggregato [0..1] ricavato da vehicle_stability().
+        """
+
+        kappa = self.curvature_profile()
+
+        if not kappa or not self.speed or not self.acc_y:
+            print("[plot_vehicle_stability] Dati insufficienti.")
+            return
+
+        kappa = np.asarray(kappa, float)
+        v     = np.asarray(self.speed, float)
+        ay    = np.asarray(self.acc_y, float)
+
+        n = min(len(kappa), len(v), len(ay))
+        if n < 5:
+            print("[plot_vehicle_stability] Troppi pochi punti.")
+            return
+
+        kappa = kappa[:n]
+        v     = v[:n]
+        ay    = ay[:n]
+
+        v2 = v * v
+
+        # se hai distance, uso quella per l'asse X, altrimenti l'indice
+        if self.distance and len(self.distance) >= n:
+            x_axis = np.asarray(self.distance[:n], float)
+            x_label = "Distanza [m]"
+        else:
+            x_axis = np.arange(n)
+            x_label = "Indice campione"
+
+        # Consideriamo solo i punti di curva con un minimo di curvatura e velocità
+        mask = (np.abs(kappa) > 1e-6) & (v2 > 1.0)
+
+        if not np.any(mask):
+            print("[plot_vehicle_stability] Nessun punto valido per la curva.")
+            return
+
+        x_eff   = x_axis[mask]
+        kappa   = kappa[mask]
+        v2      = v2[mask]
+        ay      = ay[mask]
+
+        # 1) Accelerazione laterale attesa
+        ay_exp = v2 * kappa
+
+        # 2) Differenza (proxy slip)
+        delta_ay = np.abs(ay - ay_exp)
+
+        mean_delta = float(np.mean(delta_ay))
+
+        # uso lo stesso max_ay della metrica aggregata per coerenza
+
+        vsi = self.vehicle_stability()
+
+
+        # --- PLOT ---
+        fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(10, 7))
+
+        # 1) ay misurata vs attesa
+        ax1.plot(x_eff, ay, label="ay misurata")
+        ax1.plot(x_eff, ay_exp, linestyle="--", label="ay attesa (v²·κ)")
+        ax1.set_ylabel("ay [m/s²]")
+        ax1.set_title(f"Vehicle Stability Index (VSI) ≈ {vsi:.3f}")
+        ax1.legend()
+        ax1.grid(True)
+
+        # 2) |delta_ay|
+        ax2.plot(x_eff, delta_ay, label="|ay - ay_exp|")
+        ax2.axhline(mean_delta, linestyle="--",
+                    label=f"media |Δay| = {mean_delta:.3f}")
+        ax2.set_xlabel(x_label)
+        ax2.set_ylabel("|Δay| [m/s²]")
+        ax2.legend()
+        ax2.grid(True)
+
+        plt.tight_layout()
+        plt.show()
+
     def plot_curvature(self) -> None:
         """
         Profilo di curvatura κ lungo la distanza.
         Usa curvature_profile() e self.distance.
+        Nel titolo mostra anche curvature_mean().
         """
         kappa = np.array(self.curvature_profile(), dtype=float)
-        dist = np.array(self.distance, dtype=float)
+        dist  = np.array(self.distance, dtype=float)
 
         if len(kappa) != len(dist) or len(kappa) == 0:
             print("[plot_curvature] Dati insufficienti o mismatch dimensioni.")
             return
 
+        kappa_mean = self.curvature_mean()
+
         plt.figure()
         plt.plot(dist, kappa)
         plt.xlabel("Distanza [m]")
         plt.ylabel("Curvatura κ [1/m]")
-        plt.title(f"Corner {self.corner_id} – Profilo di curvatura")
-        plt.tight_layout()
-        plt.show()
-
-
-    def plot_stability_profile(self, use_time: bool = False) -> None:
-        """
-        Profilo di stabilità laterale:
-        |acc_y| lungo la curva, con media e ±1 deviazione standard.
-
-        Utile per vedere se la curva è "pulita" o se ci sono oscillazioni
-        evidenti della forza laterale.
-        """
-        if not self.acc_y or not self.distance or not self.time:
-            print("[plot_stability_profile] Dati insufficienti.")
-            return
-
-        ay = np.asarray(self.acc_y, dtype=float)
-        ay_abs = np.abs(ay)
-
-        mean_ay = float(ay_abs.mean())
-        std_ay = float(ay_abs.std())
-
-        x = np.asarray(self.time if use_time else self.distance, dtype=float)
-        x_label = "Tempo [s]" if use_time else "Distanza [m]"
-
-        stab = self.stability()
-
-        plt.figure()
-        plt.plot(x, ay_abs, label="|acc_y|", linewidth=1.5)
-        plt.axhline(mean_ay, linestyle="--", label="media |acc_y|")
-        plt.axhline(mean_ay + std_ay, linestyle=":", label="media + σ")
-        plt.axhline(mean_ay - std_ay, linestyle=":", label="media - σ")
-
-        plt.xlabel(x_label)
-        plt.ylabel("|acc_y| [m/s²]")
         plt.title(
-            f"Corner {self.corner_id} – Profilo stabilità laterale\n"
-            f"stability = std(|acc_y|)/max(|acc_y|) = {stab:.3f}"
+            f"Corner {self.corner_id} – Profilo di curvatura\n"
+            f"curvature_mean ≈ {kappa_mean:.4f} [1/m]"
         )
-        plt.legend(loc="best")
         plt.tight_layout()
         plt.show()
-
 
     def plot_efficiency_profile(self, fraction: float = 0.10, use_time: bool = False) -> None:
         """
         Profilo di efficienza accelerativa:
         mostra la velocità lungo la curva e i segmenti usati per stimare
-        v_in e v_out nella metrica di efficienza.
+        v_in e v_out nella metrica di efficienza().
         """
         if not self.speed or not self.distance or not self.time:
             print("[plot_efficiency_profile] Dati insufficienti.")
@@ -576,21 +822,21 @@ class Curve:
         x_label = "Tempo [s]" if use_time else "Distanza [m]"
 
         plt.figure()
-        plt.plot(x, spd, label="Speed", linewidth=2)
+        plt.plot(x, spd, label="Speed [m/s]", linewidth=2)
 
         # evidenzia i segmenti di ingresso/uscita usati per la metrica
         plt.axvspan(x[0], x[idx_in_end-1], alpha=0.2, label="zona v_in")
         plt.axvspan(x[idx_out_start], x[-1], alpha=0.2, label="zona v_out")
 
         # linee orizzontali per v_in e v_out
-        plt.axhline(v_in, linestyle="--", label=f"v_in ≈ {v_in:.1f}")
-        plt.axhline(v_out, linestyle=":", label=f"v_out ≈ {v_out:.1f}")
+        plt.axhline(v_in, linestyle="--", label=f"v_in ≈ {v_in:.1f} m/s")
+        plt.axhline(v_out, linestyle=":", label=f"v_out ≈ {v_out:.1f} m/s")
 
         plt.xlabel(x_label)
-        plt.ylabel("Velocità [unità]")
+        plt.ylabel("Velocità [m/s]")
         plt.title(
             f"Corner {self.corner_id} – Profilo efficienza accelerativa\n"
-            f"efficiency = (v_out² - v_in²)/dt = {eff:.3f}"
+            f"efficiency = (v_out² - v_in²)/dt ≈ {eff:.3f} [m²/s³]"
         )
         plt.legend(loc="best")
         plt.tight_layout()
@@ -602,9 +848,9 @@ class Curve:
         mostra l'andamento locale di throttle*speed (≈ “potenza motore”)
         e l'area complessiva corrisponde alla metrica energy_input().
         """
-        thr = np.asarray(self._normalize_pedal(self.throttle), dtype=float)
-        spd = np.asarray(self.speed, dtype=float)
-        t   = np.asarray(self.time, dtype=float)
+        thr  = np.asarray(self._normalize_pedal(self.throttle), dtype=float)
+        spd  = np.asarray(self.speed, dtype=float)
+        t    = np.asarray(self.time, dtype=float)
         dist = np.asarray(self.distance, dtype=float)
 
         if len(t) < 2 or len(thr) != len(t) or len(spd) != len(t):
@@ -616,10 +862,10 @@ class Curve:
             print("[plot_energy_input_profile] dt non valido.")
             return
 
-        # integrando locale: throttle * speed * dt
-        power_like = thr[1:] * spd[1:]          # parte “istantanea”
-        x_mid_time  = 0.5 * (t[1:] + t[:-1])
-        x_mid_dist  = 0.5 * (dist[1:] + dist[:-1])
+        # parte “istantanea” (prima di moltiplicare per dt)
+        power_like = thr[1:] * spd[1:]
+        x_mid_time = 0.5 * (t[1:] + t[:-1])
+        x_mid_dist = 0.5 * (dist[1:] + dist[:-1])
         x = x_mid_time if use_time else x_mid_dist
         x_label = "Tempo [s]" if use_time else "Distanza [m]"
 
@@ -633,12 +879,11 @@ class Curve:
         plt.ylabel("thr * speed [unità arbitrarie]")
         plt.title(
             f"Corner {self.corner_id} – Profilo energy_input\n"
-            f"∫ thr*speed dt ≈ {E_in:.3f}"
+            f"∫ thr*speed dt ≈ {E_in:.3f} [u.a.]"
         )
         plt.legend(loc="best")
         plt.tight_layout()
         plt.show()
-
 
     def plot_energy_lost_brake_profile(self, use_time: bool = False) -> None:
         """
@@ -647,9 +892,9 @@ class Curve:
         (≈ “potenza persa in frenata”) e l'area totale è la metrica
         energy_lost_brake().
         """
-        ax  = np.asarray(self.acc_x, dtype=float)
-        brk = np.asarray(self.brake, dtype=float)
-        t   = np.asarray(self.time, dtype=float)
+        ax   = np.asarray(self.acc_x, dtype=float)
+        brk  = np.asarray(self.brake, dtype=float)
+        t    = np.asarray(self.time, dtype=float)
         dist = np.asarray(self.distance, dtype=float)
 
         if len(t) < 2 or len(brk) != len(t) or len(ax) != len(t):
@@ -661,10 +906,10 @@ class Curve:
             print("[plot_energy_lost_brake_profile] dt non valido.")
             return
 
-        dec = np.maximum(-ax, 0.0)             # solo decelerazione
-        loss_inst = brk[1:] * dec[1:]          # parte “istantanea”
-        x_mid_time  = 0.5 * (t[1:] + t[:-1])
-        x_mid_dist  = 0.5 * (dist[1:] + dist[:-1])
+        dec = np.maximum(-ax, 0.0)        # solo decelerazione
+        loss_inst = brk[1:] * dec[1:]     # parte “istantanea”
+        x_mid_time = 0.5 * (t[1:] + t[:-1])
+        x_mid_dist = 0.5 * (dist[1:] + dist[:-1])
         x = x_mid_time if use_time else x_mid_dist
         x_label = "Tempo [s]" if use_time else "Distanza [m]"
 
@@ -678,19 +923,18 @@ class Curve:
         plt.ylabel("brake * dec [unità arbitrarie]")
         plt.title(
             f"Corner {self.corner_id} – Profilo energy_lost_brake\n"
-            f"∫ brake * (-acc_x) dt ≈ {E_loss:.3f}"
+            f"∫ brake * (-acc_x) dt ≈ {E_loss:.3f} [u.a.]"
         )
         plt.legend(loc="best")
         plt.tight_layout()
         plt.show()
 
-
     def plot_aggressiveness_profile(self, use_time: bool = False) -> None:
         """
         Profilo di aggressività:
         - throttle normalizzato
-        - derivata d(throttle)/dt
-        - evidenzia il picco di decelerazione e il max |dthr/dt|
+        - derivata d(throttle)/dt (velocità di apertura gas)
+        - evidenzia il picco di decelerazione
 
         Nel titolo viene riportata la metrica aggressiveness().
         """
@@ -698,10 +942,10 @@ class Curve:
             print("[plot_aggressiveness_profile] Dati insufficienti.")
             return
 
-        t   = np.asarray(self.time, dtype=float)
+        t    = np.asarray(self.time, dtype=float)
         dist = np.asarray(self.distance, dtype=float)
-        thr = np.asarray(self._normalize_pedal(self.throttle), dtype=float)
-        ax  = np.asarray(self.acc_x, dtype=float)
+        thr  = np.asarray(self._normalize_pedal(self.throttle), dtype=float)
+        ax   = np.asarray(self.acc_x, dtype=float)
 
         if len(t) < 2 or len(thr) != len(t) or len(ax) != len(t):
             print("[plot_aggressiveness_profile] Dati insufficienti (dimensioni).")
@@ -713,8 +957,8 @@ class Curve:
             print("[plot_aggressiveness_profile] dt non valido.")
             return
         dthr_dt = np.diff(thr) / dt
-        x_mid_time  = 0.5 * (t[1:] + t[:-1])
-        x_mid_dist  = 0.5 * (dist[1:] + dist[:-1])
+        x_mid_time = 0.5 * (t[1:] + t[:-1])
+        x_mid_dist = 0.5 * (dist[1:] + dist[:-1])
         x = x_mid_time if use_time else x_mid_dist
         x_label = "Tempo [s]" if use_time else "Distanza [m]"
 
@@ -743,21 +987,20 @@ class Curve:
 
         plt.title(
             f"Corner {self.corner_id} – Profilo aggressiveness\n"
-            f"dec_peak = {dec_peak:.2f}, max|dthr/dt| = {max_dthr:.2f}, "
-            f"aggressiveness = {agg_val:.3f}"
+            f"dec_peak = {dec_peak:.2f} m/s², max|dthr/dt| = {max_dthr:.2f} 1/s, "
+            f"aggressiveness = {agg_val:.3f} (0=calmo,1=molto aggressivo)"
         )
         plt.tight_layout()
         plt.show()
 
-
     def plot_fluidity_profile(self, use_time: bool = False) -> None:
         """
         Profilo di fluidità:
-        mostra throttle, brake e acc_x (scalato) sulla stessa X.
+        mostra throttle e acc_x (scalato) sulla stessa X.
         Serve a vedere visivamente quanto i segnali sono “smooth” o seghettati.
-        Nel titolo compare la metrica fluidity().
+        Nel titolo compare la metrica fluidity() in [0,1].
         """
-        if not self.time or not self.throttle or not self.brake or not self.acc_x:
+        if not self.time or not self.throttle or not self.acc_x:
             print("[plot_fluidity_profile] Dati insufficienti.")
             return
 
@@ -793,7 +1036,121 @@ class Curve:
         plt.ylabel("Valore normalizzato")
         plt.title(
             f"Corner {self.corner_id} – Profilo fluidity\n"
-            f"fluidity = {flu:.3f} (1/var(thr,acc_x))"
+            f"fluidity = {flu:.3f} (0=nervoso, 1=molto fluido)"
+        )
+        plt.legend(loc="best")
+        plt.tight_layout()
+        plt.show()
+
+    def plot_trail_braking_profile(self, use_time: bool = False) -> None:
+        """
+        Profilo di Trail Braking:
+        - brake (0/1)
+        - |acc_y| (quanta curva stai facendo)
+        - evidenzia le zone in cui freni mentre hai carico laterale
+
+        Nel titolo viene mostrato il Trail Braking Index (TBI) in [0,1].
+        """
+        if not self.time or not self.acc_y or not self.brake:
+            print("[plot_trail_braking_profile] Dati insufficienti.")
+            return
+
+        t    = np.asarray(self.time, dtype=float)
+        dist = np.asarray(self.distance, dtype=float) if self.distance else np.arange(len(t))
+        ay   = np.asarray(self.acc_y, dtype=float)
+        brk  = np.asarray(self.brake, dtype=float)
+
+        n = min(len(t), len(ay), len(brk), len(dist))
+        if n < 2:
+            print("[plot_trail_braking_profile] Troppi pochi punti.")
+            return
+
+        t    = t[:n]
+        dist = dist[:n]
+        ay   = ay[:n]
+        brk  = brk[:n]
+
+        x = t if use_time else dist
+        x_label = "Tempo [s]" if use_time else "Distanza [m]"
+
+        ay_abs = np.abs(ay)
+
+        # maschera: punti in cui stai curvando "abbastanza"
+        curve_mask = ay_abs > 0.5  # soglia da tarare
+        brake_in_curve = (brk > 0.5) & curve_mask
+
+        tbi = self.trail_braking_index()
+
+        fig, ax1 = plt.subplots(figsize=(10, 5))
+
+        ax1.plot(x, ay_abs, label="|acc_y| [m/s²]", linewidth=1.5)
+        ax1.fill_between(x, 0, ay_abs, where=brake_in_curve, alpha=0.3,
+                         label="frenata in appoggio")
+
+        ax2 = ax1.twinx()
+        ax2.step(x, brk, where="post", linestyle="--", label="brake (0/1)")
+        ax2.set_ylabel("Brake")
+
+        ax1.set_xlabel(x_label)
+        ax1.set_ylabel("|acc_y| [m/s²]")
+        ax1.set_title(
+            f"Corner {self.corner_id} – Trail Braking Profile\n"
+            f"TBI = {tbi:.3f} (0=solo dritto, 1=frena sempre in appoggio)"
+        )
+
+        # legenda combinata
+        l1, lab1 = ax1.get_legend_handles_labels()
+        l2, lab2 = ax2.get_legend_handles_labels()
+        ax1.legend(l1 + l2, lab1 + lab2, loc="best")
+
+        ax1.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_grip_usage_profile(self, max_g: float = 3.0, use_time: bool = False) -> None:
+        """
+        Profilo di Grip Usage:
+        - g_tot = sqrt((acc_x/g)^2 + (acc_y/g)^2) lungo la curva
+        - linea orizzontale con media(g_tot)
+        - nel titolo il Grip Usage Index (GUI) = mean(g_tot) / max_g in [0,1]
+        """
+        if not self.acc_x or not self.acc_y or not self.time:
+            print("[plot_grip_usage_profile] Dati insufficienti.")
+            return
+
+        ax   = np.asarray(self.acc_x, dtype=float) / 9.81
+        ay   = np.asarray(self.acc_y, dtype=float) / 9.81
+        t    = np.asarray(self.time, dtype=float)
+        dist = np.asarray(self.distance, dtype=float) if self.distance else np.arange(len(t))
+
+        n = min(len(ax), len(ay), len(t), len(dist))
+        if n == 0:
+            print("[plot_grip_usage_profile] Troppi pochi punti.")
+            return
+
+        ax   = ax[:n]
+        ay   = ay[:n]
+        t    = t[:n]
+        dist = dist[:n]
+
+        g_tot = np.sqrt(ax * ax + ay * ay)
+        mean_g = float(np.mean(g_tot))
+        gui = self.grip_usage(max_g=max_g)  # usa la metrica
+
+        x = t if use_time else dist
+        x_label = "Tempo [s]" if use_time else "Distanza [m]"
+
+        plt.figure(figsize=(10, 5))
+        plt.plot(x, g_tot, label="g_tot (G combinato)", linewidth=1.5)
+        plt.axhline(mean_g, linestyle="--",
+                    label=f"mean(g_tot) ≈ {mean_g:.2f} G")
+        plt.axhline(max_g, linestyle=":", label=f"max_g = {max_g:.2f} G")
+
+        plt.xlabel(x_label)
+        plt.ylabel("G combinato [g]")
+        plt.title(
+            f"Corner {self.corner_id} – Grip Usage Profile\n"
+            f"GUI = mean(g_tot)/max_g ≈ {gui:.3f}"
         )
         plt.legend(loc="best")
         plt.tight_layout()
