@@ -12,6 +12,9 @@ class Curve:
         apex_dist: float,
         lower_bound: float,
         upper_bound: float,
+        compound: str,
+        life: int,
+        stint: int,
         time: List[float],
         rpm: List[float],
         speed: List[float],
@@ -41,6 +44,9 @@ class Curve:
         self.x = x
         self.y = y
         self.z = z
+        self.compound = compound
+        self.life = life
+        self.stint = stint
 
 
 

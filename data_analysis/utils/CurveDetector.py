@@ -1,7 +1,10 @@
 import json
+import os
 import matplotlib.pyplot as plt
 from Model.Curve import Curve
 from .utils_for_array import *
+
+import os
 
 class CurveDetector:
     # ================== PARAMETRI DA TARARE (default) ==================
@@ -33,6 +36,15 @@ class CurveDetector:
             max_samples_in_curve if max_samples_in_curve is not None else self.MAX_SAMPLES_IN_CURVE_DEFAULT
         )
 
+        
+        self.telemetry_filename = telemetry_filename
+        self.corners_filename = corners_filename
+
+        # --- Tire Info Extraction ---
+        self.compound = "UNKNOWN"
+        self.tire_life = 0
+        self.stint = 0
+        
         # --- 1) carico telemetria ---
         with open(telemetry_filename, "r") as f:
             tel_data = json.load(f)
@@ -51,6 +63,7 @@ class CurveDetector:
         self.tel_dist = tel["distance"]
         self.throttle = tel["throttle"]
         self.brake = tel["brake"]
+        
 
         # --- 2) carico corner map ---
         with open(corners_filename, "r") as f:
@@ -59,7 +72,39 @@ class CurveDetector:
         self.corner_numbers = corner_map["CornerNumber"]
         self.corner_distances = corner_map["Distance"]
 
+
     # -------------------------------------------------------------
+
+    def compaund_and_life(self):
+
+        try:
+            dir_path = os.path.dirname(self.telemetry_filename)
+            base_name = os.path.basename(self.telemetry_filename)
+
+            # Extract lap number from filename (e.g., "12_tel.json" -> 12)
+            parts = base_name.split("_")
+            if parts[0].isdigit():
+                current_lap = int(parts[0]) - 1
+               
+                laptimes_path = os.path.join(dir_path, "laptimes.json")
+                if os.path.exists(laptimes_path):
+                    with open(laptimes_path, "r") as f:
+                        laptimes_data = json.load(f)
+                        
+                    if "lap" in laptimes_data:
+                        
+                        if current_lap != -1:
+                            if "compound" in laptimes_data:
+                                self.compound = laptimes_data["compound"][current_lap]
+                            if "life" in laptimes_data:
+                                self.tire_life = laptimes_data["life"][current_lap]
+                            if "stint" in laptimes_data:
+                                self.stint = laptimes_data["stint"][current_lap]
+
+        except Exception as e:
+            print(f"Error extracting tire info for {telemetry_filename}: {e}")
+
+
 
     def isApexInInterval(self, dist_array, apex_distances, index_end, index_start, curve_number):
         if dist_array[index_start] > apex_distances[curve_number]:
@@ -113,6 +158,9 @@ class CurveDetector:
         return curve_start_idx, curve_end_idx
 
     def calcolo_curve(self) -> list:
+
+        self.compaund_and_life()
+
         detected_corners = []
 
         n_corners = len(self.corner_distances)
@@ -164,6 +212,9 @@ class CurveDetector:
                         apex_dist=current_apex_point,
                         lower_bound=lower_bound,
                         upper_bound=upper_bound,
+                        compound=self.compound,
+                        life= self.tire_life,
+                        stint= self.stint,
                         time=self.time[curve_start_idx:curve_end_idx],
                         rpm=self.rpm[curve_start_idx:curve_end_idx],
                         speed=self.speed[curve_start_idx:curve_end_idx],
