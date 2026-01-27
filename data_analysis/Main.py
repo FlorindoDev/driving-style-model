@@ -1,10 +1,11 @@
 from  Model.Curve import Curve
 from utils.CurveDetector import CurveDetector
-
+import os
 
 def main():
     """Funzione main del progetto Iot Zecconi e Gagliotti"""
-    print("Ciao dal main!")
+ 
+
     curve_detector = CurveDetector("data/4_telM.json", "data/corners_M.json")
     curves = curve_detector.calcolo_curve()
     for i in range(0 , len(curves)):
