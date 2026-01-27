@@ -26,7 +26,7 @@ except ImportError:
 DATA_DIR = os.path.abspath(os.path.join(parent_dir, "..", "data", "2025-main"))
 OUTPUT_FILE = os.path.abspath(os.path.join(parent_dir, "dataset_curves.csv"))
 MAX_POINTS = 50
-PADDING = 1000
+PADDING = -1000
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -44,7 +44,7 @@ def get_padded_array(arr, max_len=MAX_POINTS):
     if len(arr) > max_len:
         return arr[:max_len]
     else:
-        return np.pad(arr, (PADDING, max_len - len(arr)), 'constant', constant_values=0)
+        return np.pad(arr, (0, max_len - len(arr)), 'constant', constant_values=PADDING)
 
 def process_grand_prix(gp_path):
     """Processes a single Grand Prix directory."""
@@ -181,7 +181,7 @@ def main():
             try:
                 print(f"Saveing on CSV... ")
                 # Append mode 'a', header only if not written yet
-                df.to_csv(OUTPUT_FILE, mode='a', index=False, header=not header_written)
+                df.to_csv(OUTPUT_FILE, mode='a', index=False, chunksize=10000,header=not header_written)
                 header_written = True
                 
                 count = len(df)

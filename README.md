@@ -1,0 +1,1 @@
+.\.IoT\Scripts\Activate.ps1  
