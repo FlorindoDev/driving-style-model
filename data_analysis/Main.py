@@ -6,7 +6,7 @@ def main():
     """Funzione main del progetto Iot Zecconi e Gagliotti"""
  
 
-    curve_detector = CurveDetector("data/2025-main/Canadian Grand Prix/Race/LEC/2_tel.json", "data/2025-main/Canadian Grand Prix/Race/corners.json")
+    curve_detector = CurveDetector("data/2025-main/Japanese Grand Prix/Race/ALB/1_tel.json", "data/2025-main/Japanese Grand Prix/Race/corners.json")
     curves = curve_detector.calcolo_curve()
     #for i in range(0 , len(curves)):
         #print(len(curves[i].time))

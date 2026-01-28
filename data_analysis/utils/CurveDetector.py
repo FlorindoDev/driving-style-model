@@ -3,9 +3,13 @@ import os
 import matplotlib.pyplot as plt
 from Model.Curve import Curve
 from .utils_for_array import *
+import math
 
 
 import os
+
+
+
 
 class CurveDetector:
     # ================== PARAMETRI DA TARARE (default) ==================
@@ -72,9 +76,32 @@ class CurveDetector:
 
         self.corner_numbers = corner_map["CornerNumber"]
         self.corner_distances = corner_map["Distance"]
+        self.corner_X = corner_map["X"]
+        self.corner_Y = corner_map["Y"]
 
 
     # -------------------------------------------------------------
+
+
+    def distanza(self, p1, p2):
+        if len(p1) != len(p2):
+            raise ValueError("I due punti devono avere la stessa dimensione")
+        somma = 0
+
+        for a, b in zip(p1, p2):
+            somma += (b - a) ** 2
+        return math.sqrt(somma)
+
+    def nearest_point_index(self,xs, ys, cx, cy):
+        """Ritorna (idx, dist) del punto (xs[idx], ys[idx]) più vicino a (cx, cy)."""
+        best_idx = None
+        best_dist = float("inf")
+        for idx, (x, y) in enumerate(zip(xs, ys)):
+            d = self.distanza((x, y), (cx, cy))
+            if d < best_dist:
+                best_dist = d
+                best_idx = idx
+        return best_idx, best_dist
 
     def compaund_and_life(self):
 
@@ -107,11 +134,11 @@ class CurveDetector:
 
 
 
-    def isApexInInterval(self, dist_array, corner_distances, index_end, index_start, curve_number):
-        if dist_array[index_start] > corner_distances[curve_number]:
+    def isApexInInterval(self, index_end, index_start):
+        if index_start > self.index_center_current_corner:
             return False
 
-        if dist_array[index_end] < corner_distances[curve_number]:
+        if index_end < self.index_center_current_corner:
             return False
 
         return True
@@ -145,16 +172,22 @@ class CurveDetector:
                     curve_start_idx = idx
             else:
                 if acc_smooth <= self.ACC_EXIT_THR:
-                    if not self.isApexInInterval(self.tel_dist, self.corner_distances, idx, curve_start_idx, curve_number):
+                    if not self.isApexInInterval( idx, curve_start_idx):
                         in_curve = False
                         curve_start_idx = None
                     else:
                         curve_end_idx = idx
                         break
+         
 
             # se sono arrivato alla fine finestra e sono ancora "in curva"
             if in_curve and curve_end_idx is None:
                 curve_end_idx = end_win_idx
+
+        if not self.isApexInInterval(curve_end_idx, curve_start_idx):
+            curve_end_idx = None
+            curve_start_idx = None 
+        
 
         return curve_start_idx, curve_end_idx
 
@@ -166,18 +199,23 @@ class CurveDetector:
 
         n_corners = len(self.corner_distances)
 
-        for i in range(n_corners):
+        for i in range(0,n_corners):
 
-            current_corner_distance = self.corner_distances[i]
-            prev_apex = 0
-            next_apex = 0
-
+            self.index_center_current_corner, _ = self.nearest_point_index(self.x,self.y ,self.corner_X[i],self.corner_Y[i])
+            current_corner_distance = self.tel_dist[self.index_center_current_corner]
+            
+            prev_center_curve = 0
+            next_center_curve = 0
+            
             if (i > 0):
-                prev_apex = self.corner_distances[i - 1]
+                prev_index_center_current_corner, _ = self.nearest_point_index(self.x,self.y ,self.corner_X[i-1],self.corner_Y[i-1])
+                prev_center_curve = self.tel_dist[prev_index_center_current_corner]
             if (i < n_corners - 1):
-                next_apex = self.corner_distances[i + 1]
+                next_index_center_current_corner, _ = self.nearest_point_index(self.x,self.y ,self.corner_X[i+1],self.corner_Y[i+1])
+                next_center_curve = self.tel_dist[next_index_center_current_corner]
 
-            lower_bound, upper_bound = self.getBounds(i, current_corner_distance, prev_apex, next_apex, n_corners)
+            lower_bound, upper_bound = self.getBounds(i, current_corner_distance, prev_center_curve, next_center_curve, n_corners)
+
 
             start_win_idx = find_frist_value(self.tel_dist, lower_bound)
             end_win_idx = find_last_value(self.tel_dist, upper_bound)
@@ -189,9 +227,7 @@ class CurveDetector:
                 lenght_curve = curve_end_idx - curve_start_idx + 1
                 if lenght_curve >= self.MIN_SAMPLES_IN_CURVE:
                   
-                    #if lenght_curve > self.MAX_SAMPLES_IN_CURVE:
-                    pilot_apex = find_closest_value(self.tel_dist, self.corner_distances[i])
-
+                    pilot_apex = self.index_center_current_corner
                     distance_from_start = pilot_apex - curve_start_idx
                     distance_from_end   = curve_end_idx - pilot_apex
 
@@ -251,11 +287,13 @@ class CurveDetector:
         ax2.set_ylabel('Throttle / Brake (%)', color='tab:red')
         ax2.tick_params(axis='y', labelcolor='tab:red')
 
+        i=0
         for c in detected_corners:
             # verticale del punto TEORICO (apice curva)
-            theo_idx = find_frist_value(self.tel_dist, c.current_corner_dist)
+           
+            theo_idx, _ = self.nearest_point_index(self.x, self.y, self.corner_X[i], self.corner_Y[i])
             ax1.axvline(self.time[theo_idx], color='black', linestyle='--', linewidth=1, alpha=0.5)
-
+            i+=1
             # finestra di ricerca [lower_bound, upper_bound]
             left_idx = find_frist_value(self.tel_dist, c.lower_bound)
             right_idx = find_last_value(self.tel_dist, c.upper_bound)
@@ -292,33 +330,78 @@ class CurveDetector:
         ax.plot(self.x, self.y, linewidth=1, alpha=0.3, label="Giro completo")
 
         # Per ogni curva, evidenzio la traiettoria dentro la curva
+        
         for c in detected_corners:
 
             # Traiettoria effettiva nella curva (già slice dell'intera telemetria)
             ax.plot(c.x, c.y, linewidth=2, label=f"Curva {c.corner_id}")
 
-            if show_apex:
-                # Provo a trovare l'indice dell'apice dentro la curva
-                # usando la distanza lungo il giro
-                try:
-                    apex_idx_local = find_frist_value(c.distance, c.current_corner_dist)
-                    apex_x = c.x[apex_idx_local]
-                    apex_y = c.y[apex_idx_local]
+           
+            
+        i=0
+        for curve in self.corner_X:
+            try:
+                apex_idx_local = find_frist_value(c.distance, c.current_corner_dist)
+                apex_x = c.x[apex_idx_local]
+                apex_y = c.y[apex_idx_local]
+                apex_x = self.corner_X[i]
+                apex_y = self.corner_Y [i]
+                i+=1
+                ax.scatter(apex_x, apex_y, s=40, marker="x", color="red")
+                ax.text(
+                    apex_x,
+                    apex_y,
+                    f"{i}",
+                    fontsize=8,
+                    color="red",
+                    ha="left",
+                    va="bottom",
+                )
+            except Exception:
+                # Se qualcosa va storto, semplicemente non disegno il marker
+                pass
+        # i=0
+        # for curve in self.corner_distances:
+        #     try:
+        #         apex_idx_local = find_frist_value(self.tel_dist, curve)
+        #          print(f"{self.tel_dist[apex_idx_local]} distanza pilota")
+        #          print(f"{self.tel_dist[apex_idx_local]} distanza pilota")
+        #         apex_x = self.x[apex_idx_local]
+        #         apex_y = self.y[apex_idx_local]
+        #          print(f"n:{apex_x}, {apex_y}")
+        #         i+=1
+        #         ax.scatter(apex_x, apex_y, s=40, marker="x", color="blue")
+        #         ax.text(
+        #             apex_x,
+        #             apex_y,
+        #             f"{i}",
+        #             fontsize=8,
+        #             color="red",
+        #             ha="left",
+        #             va="bottom",
+        #         )
+        #     except Exception:
+        #         # Se qualcosa va storto, semplicemente non disegno il marker
+        #         pass
+        
+        
+        # --- nel tuo plotting ---
+        i = 0
+        for cx, cy in zip(self.corner_X, self.corner_Y):
+            try:
+                apex_idx_local, dmin = self.nearest_point_index(self.x, self.y, cx, cy)
 
-                    ax.scatter(apex_x, apex_y, s=40, marker="x", color="red")
-                    ax.text(
-                        apex_x,
-                        apex_y,
-                        f"{c.corner_id}",
-                        fontsize=8,
-                        color="red",
-                        ha="left",
-                        va="bottom",
-                    )
-                except Exception:
-                    # Se qualcosa va storto, semplicemente non disegno il marker
-                    pass
+                # print(f"{apex_idx_local} indice (dist={dmin})")
+                apex_x = self.x[apex_idx_local]
+                apex_y = self.y[apex_idx_local]
+                # print(f"n:{apex_x}, {apex_y}")
 
+                i += 1
+                ax.scatter(apex_x, apex_y, s=40, marker="x", color="green")
+                ax.text(apex_x, apex_y, f"{i}", fontsize=8, color="red", ha="left", va="bottom")
+            except Exception:
+                pass
+        
         ax.set_xlabel("X (m)")
         ax.set_ylabel("Y (m)")
         ax.set_title("Traiettoria in curva (XY)")
@@ -329,5 +412,6 @@ class CurveDetector:
 
         plt.tight_layout()
         plt.show(block=block)
+
 
 
