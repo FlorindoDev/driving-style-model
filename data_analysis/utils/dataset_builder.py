@@ -46,7 +46,7 @@ def get_padded_array(arr, max_len=MAX_POINTS):
     else:
         return np.pad(arr, (0, max_len - len(arr)), 'constant', constant_values=PADDING)
 
-def process_grand_prix(gp_path):
+def process_grand_prix(gp_path, drivers=None):
     """Processes a single Grand Prix directory."""
     gp_name = os.path.basename(gp_path)
     race_path = os.path.join(gp_path, "Race")
@@ -69,7 +69,10 @@ def process_grand_prix(gp_path):
     gp_curves_data = []
 
     # Iterate over drivers
-    for driver_dir in os.listdir(race_path):
+    if drivers is None:
+        drivers = os.listdir(race_path)
+
+    for driver_dir in drivers:
         driver_path = os.path.join(race_path, driver_dir)
         if not os.path.isdir(driver_path):
             continue

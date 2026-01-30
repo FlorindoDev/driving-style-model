@@ -8,9 +8,6 @@ import matplotlib.pyplot as plt
 import csv
 
 
-
-
-
 print("torch:", torch.__version__)
 print("torch.version.hip:", torch.version.hip)
 print("cuda.is_available (ROCm usa questa API):", torch.cuda.is_available())

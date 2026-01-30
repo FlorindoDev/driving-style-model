@@ -1,19 +1,15 @@
 import time
-import numpy as np
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
 from mpl_toolkits.mplot3d import Axes3D  # necessario per il 3D
 from auto_encoder import AutoEncoder
-import numpy as np
-import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 
 
 
 
-path = "..\data\dataset\\normalized_dataset.npz"  # cambia con il tuo file
+path = "..\data\dataset\\normalized_dataset2.npz"  # cambia con il tuo file
 d = np.load(path, allow_pickle=True)
 
 data = d["data"]
@@ -27,17 +23,17 @@ mask = d["mask"]
 
 
 
-model = AutoEncoder(data.shape[1], latent_dim=32)
+model = AutoEncoder(data.shape[1], latent_dim=64)
 # model.train(
-#         optimizer=torch.optim.SGD(model.parameters(), lr=0.001),
-#         epochs=1,
+#         optimizer=torch.optim.AdamW(model.parameters(), lr=0.001,weight_decay=0.0001),
+#         epochs=10,
 #         input=data,
 #         mask=mask
 #     )   
 
-# torch.save(model.encoder.state_dict(), ".\\Pesi\\encoder.pth")
+# torch.save(model.encoder.state_dict(), "Pesi/encoder5.pth")
 
-model.encoder.load_state_dict(torch.load(".\\Pesi\\encoder.pth", map_location="cpu"))
+model.encoder.load_state_dict(torch.load(".\\Pesi\\encoder4.pth", map_location="cpu"))
 
 
 avg = []
@@ -63,4 +59,70 @@ ax.set_xlabel("PC1")
 ax.set_ylabel("PC2")
 ax.set_zlabel("PC3")
 
+plt.show()
+
+# Riduzione a 2 dimensioni
+Z2 = PCA(n_components=2).fit_transform(Z)
+
+# Plot 2D
+plt.figure()
+plt.scatter(Z2[:, 0], Z2[:, 1])
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.title("Spazio latente (PCA 2D)")
+plt.grid(True)
+plt.show()
+
+
+from sklearn.cluster import KMeans
+
+kmeans = KMeans(n_clusters=3, random_state=0)
+clusters = kmeans.fit_predict(Z)
+
+# Riduciamo a 2 dimensioni
+pca = PCA(n_components=2)
+Z_2d = pca.fit_transform(Z)
+
+# Plot
+plt.figure(figsize=(8,6))
+scatter = plt.scatter(Z_2d[:, 0], Z_2d[:, 1], c=clusters)
+plt.xlabel("PC1")
+plt.ylabel("PC2")
+plt.title("Cluster nello spazio latente (PCA)")
+plt.colorbar(scatter, label="Cluster")
+plt.grid(True)
+plt.show()
+
+
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+import numpy as np
+
+# Clustering nello spazio latente
+kmeans = KMeans(n_clusters=3, random_state=0)
+clusters = kmeans.fit_predict(Z)
+
+# Riduzione a 3 dimensioni
+pca = PCA(n_components=3)
+Z_3d = pca.fit_transform(Z)
+
+# Plot 3D
+fig = plt.figure(figsize=(8, 6))
+ax = fig.add_subplot(111, projection="3d")
+
+sc = ax.scatter(
+    Z_3d[:, 0],
+    Z_3d[:, 1],
+    Z_3d[:, 2],
+    c=clusters
+)
+
+ax.set_xlabel("PC1")
+ax.set_ylabel("PC2")
+ax.set_zlabel("PC3")
+ax.set_title("Cluster nello spazio latente (PCA 3D)")
+
+plt.colorbar(sc, label="Cluster")
 plt.show()

@@ -19,27 +19,27 @@ df = df.drop(df.columns[2], axis=1)
 # Rimozione delle colonne X, Y, Z
 df = df.drop(df.columns[352:502], axis=1)
 
+df = df.drop(df.columns[352:], axis=1)
+
+
 # --- ONE-HOT ENCODING ---
 if 'Compound' in df.columns:
     print("Found 'Compound' column, performing One-Hot Encoding...")
 
-    # using get_dummies directly
     compound_dummies = pd.get_dummies(df['Compound'], prefix='Compound', dtype=float)
-    
-    # Concatenate and drop original
+
     df = pd.concat([df, compound_dummies], axis=1)
     df = df.drop('Compound', axis=1)
 else:
     print("WARNING: 'Compound' column not found in dataframe columns:", df.columns)
 
 # --- MASKING & NORMALIZATION ---
-# Padding value is -1000
 PADDING_VALUE = -1000.0
 
 # Create mask (1 for valid data, 0 for padding)
 mask = (df != PADDING_VALUE).astype(float)
 
-# Replace PADDING_VALUE with NaN to compute stats ignoring it
+
 df_for_stats = df.replace(PADDING_VALUE, np.nan)
 
 # --- GROUPED STATS CALCULATION ---
@@ -122,7 +122,7 @@ print("Mask Shape:", mask.shape)
 
 
 # Save to .npz
-output_filename = "../../data/dataset/normalized_dataset.npz"
+output_filename = "../../data/dataset/normalized_dataset2.npz"
 np.savez(
     output_filename, 
     data=df_normalized.values, 
