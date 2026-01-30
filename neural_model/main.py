@@ -40,7 +40,7 @@ avg = []
 with torch.no_grad():
 
     for elem in data[:1000]:
-        z = model.forward(torch.tensor(np.atleast_1d(elem), dtype=torch.float32),True)
+        z = model.encode(torch.tensor(np.atleast_1d(elem), dtype=torch.float32))
         avg.append(z.cpu().numpy())
 
 Z = np.array(avg)  # shape: (N, 32)
