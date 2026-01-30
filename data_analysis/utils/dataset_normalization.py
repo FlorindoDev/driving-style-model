@@ -11,14 +11,17 @@ df = pd.read_csv(
     encoding="utf-8",
     decimal="."
 )
+
+
 # Rimozione delle colonne non necessarie
 df = df.drop(df.columns[:5], axis=1)
 
-
 df = df.drop(df.columns[2], axis=1)
+
 # Rimozione delle colonne X, Y, Z
 df = df.drop(df.columns[352:502], axis=1)
 
+# Rimozione time e distanza 
 df = df.drop(df.columns[352:], axis=1)
 
 
@@ -32,6 +35,8 @@ if 'Compound' in df.columns:
     df = df.drop('Compound', axis=1)
 else:
     print("WARNING: 'Compound' column not found in dataframe columns:", df.columns)
+
+
 
 # --- MASKING & NORMALIZATION ---
 PADDING_VALUE = -1000.0
