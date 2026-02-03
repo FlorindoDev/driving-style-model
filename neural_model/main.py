@@ -352,7 +352,10 @@ def main():
 
     print("\n[7/7] Visualizing Curves...")
     for i in range(0 , len(curves)):
-        print(curves[i].num_cluster)
+        if(curves[i].num_cluster == 0):
+            print(f"Clutser:{curves[i].num_cluster}")
+            curves[i].plot_all()
+
     
     print("\n" + "=" * 60)
     print("Analysis complete!")
