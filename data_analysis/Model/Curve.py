@@ -358,6 +358,77 @@ class Curve:
         else:
             return "MASSIMO ATTACCO"
     
+    def pushing_score_normalized(self) -> float:
+        """
+        SCORE per dati normalizzati per-corner (z-score).
+        
+        Per dati z-score normalizzati:
+        - z > 0 significa sopra la media della curva
+        - z < 0 significa sotto la media della curva
+        
+        Lo score indica quanto "sopra la media" sta guidando:
+        - Alto (70-100): sta spingendo molto più della media
+        - Medio (40-70): guida normale/ritmo
+        - Basso (0-40): sta gestendo, sotto la media
+        
+        Returns:
+            Score 0-100
+        """
+        # Per dati normalizzati, usiamo le medie z-score
+        # Valori positivi = sopra la media = più aggressivo
+        
+        # 1. Speed score: velocità media (z-score)
+        speed_z = np.mean(self.speed)
+        speed_score = self._zscore_to_percentile(speed_z)
+        
+        # 2. Throttle score: uso acceleratore medio (z-score)
+        throttle_z = np.mean(self.throttle)
+        throttle_score = self._zscore_to_percentile(throttle_z)
+        
+        # 3. Acceleration intensity: quanto sta accelerando (G totali)
+        acc_x = np.asarray(self.acc_x)
+        acc_y = np.asarray(self.acc_y)
+        acc_total_z = np.mean(np.sqrt(acc_x**2 + acc_y**2))
+        acc_score = self._zscore_to_percentile(acc_total_z)
+        
+        # 4. Brake aggression: quando frena, quanto forte
+        brake_arr = np.asarray(self.brake)
+        brake_z = np.mean(brake_arr)
+        # Per brake, valori negativi = meno brake = più racing line
+        # Ma valori positivi alti = frenate aggressive
+        brake_score = self._zscore_to_percentile(brake_z * 0.5)  # Peso ridotto
+        
+        # 5. Variability (smoothness inversa): quanto è variabile la guida
+        # Alta variabilità = sta spingendo al limite
+        speed_std = np.std(self.speed) if len(self.speed) > 1 else 0
+        variability_score = self._zscore_to_percentile(speed_std)
+        
+        # Media ponderata
+        total = (
+            speed_score * 0.30 +       # Velocità è il fattore principale
+            throttle_score * 0.25 +    # Uso acceleratore
+            acc_score * 0.25 +         # Intensità G-force
+            brake_score * 0.10 +       # Frenate aggressive
+            variability_score * 0.10   # Variabilità/rischio
+        )
+        
+        return np.clip(total, 0, 100)
+    
+    def _zscore_to_percentile(self, z: float) -> float:
+        """
+        Converte z-score in percentile approssimato (0-100).
+        
+        z=-2 -> ~2.5 percentile
+        z=-1 -> ~16 percentile
+        z=0  -> ~50 percentile
+        z=+1 -> ~84 percentile
+        z=+2 -> ~97.5 percentile
+        """
+        # Approssimazione sigmoide per mappare z-score a 0-100
+        # Usiamo una funzione che satura a ±3 z-score
+        percentile = 50 + 50 * np.tanh(z * 0.5)
+        return np.clip(percentile, 0, 100)
+    
     #########################################################
     #                       Grafici                         #
     #########################################################

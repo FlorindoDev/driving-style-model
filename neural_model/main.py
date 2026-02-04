@@ -31,12 +31,12 @@ ENCODER_WEIGHTS_PATH = "neural_model\\Pesi\\encoder3.pth"
 SAVE_ENCODER_PATH = "neural_model\\Pesi\\encoder3.pth"  # Path for saving new trained weights
 DEC_MODEL_PATH = "neural_model\\Pesi\\dec_model.pth"  # Path for DEC model (encoder + decoder + clustering)
 LATENT_DIM = 32
-NUM_SAMPLES = 1000
+NUM_SAMPLES = 20000
 NUM_CLUSTERS = 3
 RANDOM_STATE = 0
 
 # Training configuration
-TRAIN_MODEL = True  # Set to True to train the model instead of loading weights
+TRAIN_MODEL = False  # Set to True to train the model instead of loading weights
 SAVE_WEIGHTS = True  # Set to True to save weights after training
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.0001
@@ -413,11 +413,11 @@ def main():
     
     for curve in curves:
         if curve.num_cluster == 0:
-            cluster_0.append(curve.pushing_score())
+            cluster_0.append(curve.pushing_score_normalized())
         elif curve.num_cluster == 1:
-            cluster_1.append(curve.pushing_score())
+            cluster_1.append(curve.pushing_score_normalized())
         else:
-            cluster_2.append(curve.pushing_score())
+            cluster_2.append(curve.pushing_score_normalized())
     
     print("Cluster 0:")
     print(f"\t\tMedia : {np.asarray(cluster_0).mean()}")
