@@ -170,7 +170,8 @@ def main():
         item_path = os.path.join(DATA_DIR, item)
         if os.path.isdir(item_path) and "Grand Prix" in item:
             # Process one Grand Prix
-            gp_data = process_grand_prix(item_path,["LEC", "HAM"])
+            #gp_data = process_grand_prix(item_path,["LEC", "HAM"])
+            gp_data = process_grand_prix(item_path)
             
             if not gp_data:
                 continue
