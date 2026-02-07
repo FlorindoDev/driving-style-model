@@ -1,8 +1,8 @@
 import json
 import os
 import matplotlib.pyplot as plt
-from Model.Curve import Curve
-from .utils_for_array import *
+from src.analysis.Curve import Curve
+from src.analysis.utils_for_array import *
 import math
 import os
 

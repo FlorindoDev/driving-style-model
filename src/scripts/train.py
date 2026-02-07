@@ -8,27 +8,22 @@ performs dimensionality reduction using PCA, and visualizes clusters in both 2D 
 import torch
 import matplotlib.pyplot as plt
 import numpy as np
-import sys
 import os
 
-# Add project root to Python path to enable imports from data_analysis
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-from data_analysis.Model.Curve import Curve
+from src.analysis.Curve import Curve
 from mpl_toolkits.mplot3d import Axes3D
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
-from auto_encoder import AutoEncoder
-from VAE import VAE
-from dataset_loader import load_and_split_dataset, load_dataset
+from src.models.auto_encoder import AutoEncoder
+from src.models.VAE import VAE
+from src.models.dataset_loader import load_and_split_dataset, load_dataset
 
 # Configuration constants
 DATASET_PATH = "data\\dataset\\normalized_dataset_2024_2025_WITH_WET.npz"
-ENCODER_WEIGHTS_PATH = "neural_model\\Pesi\\encoder5.pth"
-SAVE_ENCODER_PATH = "neural_model\\Pesi\\encoder5.pth"  # Path for saving new trained weights
+ENCODER_WEIGHTS_PATH = "src\\models\\weights\\encoder5.pth"
+SAVE_ENCODER_PATH = "src\\models\\weights\\encoder5.pth"  # Path for saving new trained weights
+
 LATENT_DIM = 32
 NUM_SAMPLES = 1127865 
 NUM_CLUSTERS = 4

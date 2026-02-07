@@ -1,6 +1,5 @@
 import os
 import json
-import sys
 import pandas as pd
 import numpy as np
 import logging
@@ -8,24 +7,13 @@ import gc
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 
-# ============================================================================
-# PATH SETUP
-# ============================================================================
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-try:
-    from utils.CurveDetector import CurveDetector
-except ImportError:
-    sys.path.append(os.path.join(parent_dir, 'utils'))
-    from CurveDetector import CurveDetector
+from src.analysis.CurveDetector import CurveDetector
 
 # ============================================================================
 # CONSTANTS
 # ============================================================================
-BASE_DATA_DIR = os.path.abspath(os.path.join(parent_dir, "..", "data"))
+BASE_DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+
 DEFAULT_OUTPUT_FILE = os.path.join(BASE_DATA_DIR, "dataset", "dataset_curves.csv")
 MAX_POINTS = 50
 PADDING_VALUE = -1000

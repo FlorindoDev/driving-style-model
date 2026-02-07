@@ -1,31 +1,21 @@
 import torch
 import numpy as np
-import sys
 import os
 import re
 
-# Add project root to Python path to enable imports from data_analysis
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
-
-# Also add data_analysis folder for CurveDetector's internal imports
-data_analysis_path = os.path.join(project_root, "data_analysis")
-if data_analysis_path not in sys.path:
-    sys.path.insert(0, data_analysis_path)
-
-from data_analysis.utils.CurveDetector import CurveDetector
-from data_analysis.Model.Curve import Curve
+from src.analysis.CurveDetector import CurveDetector
+from src.analysis.Curve import Curve
 from sklearn.cluster import KMeans
-from auto_encoder import AutoEncoder
-from VAE import VAE
+from src.models.auto_encoder import AutoEncoder
+from src.models.VAE import VAE
 
 # ==================== CONFIGURATION ====================
 # Paths
 TELEMETRY_PATH = "data/2025-main/Australian Grand Prix/Qualifying/ALB/4_tel.json"
 CORNERS_PATH = "data/2025-main/Australian Grand Prix/Race/corners.json"
-ENCODER_WEIGHTS_PATH = "neural_model/Pesi/encoder5.pth"
+ENCODER_WEIGHTS_PATH = "src/models/weights/VAE_32z_weights.pth"
 DATASET_PATH = "data/dataset/normalized_dataset_2024_2025_WITH_WET.npz"
+
 
 # Model configuration
 LATENT_DIM = 32
