@@ -26,7 +26,7 @@ except ImportError:
 # CONSTANTS
 # ============================================================================
 BASE_DATA_DIR = os.path.abspath(os.path.join(parent_dir, "..", "data"))
-DEFAULT_OUTPUT_FILE = os.path.join(BASE_DATA_DIR, "dataset", "dataset_curves_prova.csv")
+DEFAULT_OUTPUT_FILE = os.path.join(BASE_DATA_DIR, "dataset", "dataset_curves.csv")
 MAX_POINTS = 50
 PADDING_VALUE = -1000
 
@@ -469,7 +469,7 @@ def main():
     
     config = DatasetConfig(
         years=[2024, 2025],              # Years to include (None for all available)
-        drivers=["LEC"],                     # Driver codes to include (None for all)
+        drivers=None,                     # Driver codes to include (None for all)
         sessions=["Qualifying", "Race"],  # Sessions to process
         output_file=DEFAULT_OUTPUT_FILE,  # Output CSV path
     )
