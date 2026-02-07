@@ -22,13 +22,14 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 
 from auto_encoder import AutoEncoder
+from VAE import VAE
 from dataset_loader import load_and_split_dataset, load_dataset
 
 # Configuration constants
 DATASET_PATH = "data\\dataset\\normalized_dataset_2024_2025_WITH_WET.npz"
-ENCODER_WEIGHTS_PATH = "neural_model\\Pesi\\test1.pth"
-SAVE_ENCODER_PATH = "neural_model\\Pesi\\encoder4.pth"  # Path for saving new trained weights
-LATENT_DIM = 64
+ENCODER_WEIGHTS_PATH = "neural_model\\Pesi\\encoder5.pth"
+SAVE_ENCODER_PATH = "neural_model\\Pesi\\encoder5.pth"  # Path for saving new trained weights
+LATENT_DIM = 32
 NUM_SAMPLES = 1127865 
 NUM_CLUSTERS = 4
 RANDOM_STATE = 0
@@ -36,28 +37,35 @@ RANDOM_STATE = 0
 # Training configuration
 TRAIN_MODEL = False  # Set to True to train the model instead of loading weights
 SAVE_WEIGHTS = True  # Set to True to save weights after training
-LEARNING_RATE = 0.002
-WEIGHT_DECAY = 0.0002
+USE_VAE = True  # Set to True to use VAE, False for standard AutoEncoder
+LEARNING_RATE = 0.001
+WEIGHT_DECAY = 3e-4
 NUM_EPOCHS = 50
+BATCH_SIZE = 512
 TRAIN_RATIO = 0.8  # Percentuale dati per training (resto per validation)
 
 
-def load_model(input_dim: int, latent_dim: int, weights_path: str) -> AutoEncoder:
+def load_model(input_dim: int, latent_dim: int, weights_path: str, use_vae: bool = False):
     """
-    Initialize the AutoEncoder model and load pre-trained weights.
+    Initialize the model and load pre-trained weights.
     
     Args:
         input_dim: Dimension of input features
         latent_dim: Dimension of latent space
-        weights_path: Path to the saved encoder weights
+        weights_path: Path to the saved weights
+        use_vae: If True, load a VAE model; if False, load an AutoEncoder
         
     Returns:
-        Loaded AutoEncoder model
+        Loaded model (VAE or AutoEncoder)
     """
-    model = AutoEncoder(input_dim, latent_dim=latent_dim)
-    model.encoder.load_state_dict(torch.load(weights_path, map_location="cpu"))
-    model.eval()
+    if use_vae:
+        model = VAE(input_dim, latent_dim=latent_dim)
+        model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    else:
+        model = AutoEncoder(input_dim, latent_dim=latent_dim)
+        model.encoder.load_state_dict(torch.load(weights_path, map_location="cpu"))
     
+    model.eval()
     print(f"Model loaded from {weights_path}")
     
     return model
@@ -71,7 +79,8 @@ def train_model(
     val_mask: np.ndarray,
     epochs: int,
     learning_rate: float,
-    weight_decay: float
+    weight_decay: float,
+    batch_size: int
 ) -> AutoEncoder:
     """
     Train the AutoEncoder model with validation for early stopping.
@@ -104,7 +113,8 @@ def train_model(
         train_data=train_data,
         mask=train_mask,
         val_data=val_data,
-        val_mask=val_mask
+        val_mask=val_mask,
+        batch_size=batch_size
     )
     
     print("Training completed!")
@@ -112,16 +122,21 @@ def train_model(
     return model
 
 
-def save_model_weights(model: AutoEncoder, save_path: str):
+def save_model_weights(model, save_path: str):
     """
-    Save the encoder weights to a file.
+    Save the model weights to a file.
     
     Args:
-        model: AutoEncoder model
-        save_path: Path where to save the encoder weights
+        model: AutoEncoder or VAE model
+        save_path: Path where to save the weights
     """
-    torch.save(model.encoder.state_dict(), save_path)
-    print(f"Encoder weights saved to {save_path}")
+    if isinstance(model, VAE):
+        # Save entire VAE state (includes encoder, fc_mu, fc_logvar, decoder)
+        torch.save(model.state_dict(), save_path)
+    else:
+        # Save only encoder for AutoEncoder
+        torch.save(model.encoder.state_dict(), save_path)
+    print(f"Model weights saved to {save_path}")
 
 
 def encode_data(model: AutoEncoder, data: np.ndarray, mask: list, mean : list, std : list, num_samples: int) -> tuple[list, np.ndarray]:
@@ -146,7 +161,11 @@ def encode_data(model: AutoEncoder, data: np.ndarray, mask: list, mean : list, s
             # Convert to tensor, add batch dimension and move to device
             sample_tensor = torch.tensor(np.atleast_2d(sample), dtype=torch.float32).to(next(model.parameters()).device)
             
-            latent_vector = model.encode(sample_tensor)
+            # Use get_latent for VAE (returns mu), encode for AutoEncoder
+            if isinstance(model, VAE):
+                latent_vector = model.get_latent(sample_tensor)
+            else:
+                latent_vector = model.encode(sample_tensor)
             latent_np = latent_vector.squeeze(0).cpu().numpy() # Squeeze to remove batch dim for storage
             
             # Create Curve object
@@ -305,8 +324,14 @@ def main():
     
     # Initialize or load model
     if TRAIN_MODEL:
-        print("\n[2/7] Initializing and training autoencoder model...")
-        model = AutoEncoder(dataset.train_data.shape[1], latent_dim=LATENT_DIM)
+        model_type = "VAE" if USE_VAE else "AutoEncoder"
+        print(f"\n[2/7] Initializing and training {model_type} model...")
+        
+        if USE_VAE:
+            model = VAE(dataset.train_data.shape[1], latent_dim=LATENT_DIM)
+        else:
+            model = AutoEncoder(dataset.train_data.shape[1], latent_dim=LATENT_DIM)
+        
         model = train_model(
             model=model,
             train_data=dataset.train_data,
@@ -315,7 +340,8 @@ def main():
             val_mask=dataset.val_mask,
             epochs=NUM_EPOCHS,
             learning_rate=LEARNING_RATE,
-            weight_decay=WEIGHT_DECAY
+            weight_decay=WEIGHT_DECAY,
+            batch_size = BATCH_SIZE
         )
         
         # Save weights if requested
@@ -324,8 +350,8 @@ def main():
         
         model.eval() # Ensure evaluation mode
     else:
-        print("\n[2/7] Loading pre-trained autoencoder model...")
-        model = load_model(full_data.shape[1], LATENT_DIM, ENCODER_WEIGHTS_PATH)
+        print("\n[2/7] Loading pre-trained model...")
+        model = load_model(full_data.shape[1], LATENT_DIM, ENCODER_WEIGHTS_PATH, use_vae=USE_VAE)
     
     # Encode data into latent space
     print("\n[3/7] Encoding data into latent space...")
@@ -341,10 +367,10 @@ def main():
     print("\n[5/7] Performing K-Means clustering...")
     clusters = perform_clustering(latent_space, curves, NUM_CLUSTERS, RANDOM_STATE)
     
-    # # Visualize clusters
-    # print("\n[6/7] Visualizing clusters...")
-    # plot_clusters_2d(latent_space, clusters)
-    # plot_clusters_3d(latent_space, clusters)
+    # Visualize clusters
+    print("\n[6/7] Visualizing clusters...")
+    plot_clusters_2d(latent_space, clusters)
+    plot_clusters_3d(latent_space, clusters)
 
     # print("\n[7/7] Visualizing Curves...")
     # for i in range(0 , len(curves)):

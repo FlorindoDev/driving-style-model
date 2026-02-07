@@ -7,7 +7,7 @@ from typing import Tuple, Optional, List, Dict
 # Default configuration
 PADDING_VALUE = -1000.0
 COMPOUND_CATEGORIES = ['HARD', 'INTERMEDIATE','WET', 'MEDIUM', 'SOFT']
-PATH_CSV = "data/dataset/dataset_curves.csv"
+PATH_CSV = "data/dataset/dataset_curves_prova.csv"
 PATH_SAVE = "data/dataset"
 NAME_SAVE_FILE = "normalized_dataset_prova.npz"
 

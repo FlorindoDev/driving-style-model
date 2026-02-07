@@ -18,17 +18,19 @@ from data_analysis.utils.CurveDetector import CurveDetector
 from data_analysis.Model.Curve import Curve
 from sklearn.cluster import KMeans
 from auto_encoder import AutoEncoder
+from VAE import VAE
 
 # ==================== CONFIGURATION ====================
 # Paths
-TELEMETRY_PATH = "data/2025-main/Australian Grand Prix/Qualifying/NOR/19_tel.json"
+TELEMETRY_PATH = "data/2025-main/Australian Grand Prix/Qualifying/ALB/4_tel.json"
 CORNERS_PATH = "data/2025-main/Australian Grand Prix/Race/corners.json"
-ENCODER_WEIGHTS_PATH = "neural_model/Pesi/test2.pth"
+ENCODER_WEIGHTS_PATH = "neural_model/Pesi/encoder5.pth"
 DATASET_PATH = "data/dataset/normalized_dataset_2024_2025_WITH_WET.npz"
 
 # Model configuration
-LATENT_DIM = 64
+LATENT_DIM = 32
 NUM_CLUSTERS = 4
+USE_VAE = True  # Set to True to use VAE, False for standard AutoEncoder
 
 # Feature configuration (same as dataset_normalization.py)
 PADDING_VALUE = -1000.0
@@ -36,20 +38,25 @@ MAX_SAMPLES_PER_CURVE = 50  # Number of samples per feature
 TARGET_COMPOUNDS = ['HARD', 'INTERMEDIATE', 'WET', 'MEDIUM', 'SOFT']
 
 
-def load_pretrained_model(input_dim: int, latent_dim: int, weights_path: str) -> AutoEncoder:
+def load_pretrained_model(input_dim: int, latent_dim: int, weights_path: str, use_vae: bool = USE_VAE):
     """
-    Load a pretrained autoencoder model.
+    Load a pretrained model (AutoEncoder or VAE).
     
     Args:
         input_dim: Dimension of input features
         latent_dim: Dimension of latent space
         weights_path: Path to encoder weights
+        use_vae: If True, load VAE; otherwise load AutoEncoder
         
     Returns:
-        Loaded AutoEncoder model in eval mode
+        Loaded model in eval mode
     """
-    model = AutoEncoder(input_dim, latent_dim=latent_dim)
-    model.encoder.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    if use_vae:
+        model = VAE(input_dim, latent_dim=latent_dim)
+        model.load_state_dict(torch.load(weights_path, map_location="cpu"))
+    else:
+        model = AutoEncoder(input_dim, latent_dim=latent_dim)
+        model.encoder.load_state_dict(torch.load(weights_path, map_location="cpu"))
     model.eval()
     print(f"Model loaded from {weights_path}")
     return model
@@ -114,17 +121,18 @@ def curve_to_feature_vector(curve: Curve, columns: np.ndarray, mean: np.ndarray,
     
     Layout expected (based on from_norm_data):
       0: life
-      1:51 speed (50 samples)
-      51:101 rpm (50 samples)
-      101:151 throttle (50 samples)
-      151:201 brake (50 samples)
-      201:251 acc_x (50 samples)
-      251:301 acc_y (50 samples)
-      301:351 acc_z (50 samples)
+      1:51 speed (50 colonne)
+      51:101 rpm (50 colonne)
+      101:151 throttle (50 colonne)
+      151:201 brake (50 colonne)
+      201:251 acc_x (50 colonne)
+      251:301 acc_y (50 colonne)
+      301:351 acc_z (50 colonne)
       351: Compound_HARD
       352: Compound_INTERMEDIATE
-      353: Compound_MEDIUM
-      354: Compound_SOFT
+      353: Compound_WET
+      354: Compound_MEDIUM
+      355: Compound_SOFT
     
     Args:
         curve: Curve object from CurveDetector
@@ -201,7 +209,11 @@ def get_cluster_centroids_from_dataset(dataset_path: str, model: AutoEncoder, n_
     with torch.no_grad():
         model.eval()
         data_tensor = torch.tensor(data, dtype=torch.float32).to(next(model.parameters()).device)
-        latent_space = model.encode(data_tensor).cpu().numpy()
+        # Use get_latent for VAE (returns mu), encode for AutoEncoder
+        if isinstance(model, VAE):
+            latent_space = model.get_latent(data_tensor).cpu().numpy()
+        else:
+            latent_space = model.encode(data_tensor).cpu().numpy()
     
     # Fit KMeans
     print(f"Fitting KMeans with {n_clusters} clusters...")
@@ -240,7 +252,11 @@ def evaluate_curves(curves: list, model: AutoEncoder, kmeans: KMeans,
             input_tensor = torch.tensor(feature_vector, dtype=torch.float32).unsqueeze(0)
             input_tensor = input_tensor.to(next(model.parameters()).device)
             
-            latent_vector = model.encode(input_tensor)
+            # Use get_latent for VAE (returns mu), encode for AutoEncoder
+            if isinstance(model, VAE):
+                latent_vector = model.get_latent(input_tensor)
+            else:
+                latent_vector = model.encode(input_tensor)
             latent_np = latent_vector.squeeze(0).cpu().numpy()
             
             # Predict cluster

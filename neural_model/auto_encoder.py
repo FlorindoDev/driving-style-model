@@ -54,7 +54,7 @@ class AutoEncoder(nn.Module):
     il decoder ricostruisce l'input originale dal codice latente.
     """
     
-    def __init__(self, input_dim: int = 455, latent_dim: int = 32, alpha_lrelu: float = 0.1):
+    def __init__(self, input_dim: int = 455, latent_dim: int = 32, alpha_lrelu: float = 0.01, dropout_rate: int = 0.1):
         """
         Args:
             input_dim: Dimensione dell'input
@@ -67,27 +67,62 @@ class AutoEncoder(nn.Module):
         self.loss_function = MaskedMSELoss().to(device)
         self.to(device)
 
-        #Encoder: comprime x -> z (latent space)
+        # #Encoder: comprime x -> z (latent space)
+        # self.encoder = nn.Sequential(
+        #     nn.Linear(input_dim, 192),
+        #     nn.BatchNorm1d(192),
+        #     nn.LeakyReLU(alpha_lrelu, inplace=True),
+        #     nn.Linear(192, 96),
+        #     nn.BatchNorm1d(96),
+        #     nn.LeakyReLU(alpha_lrelu, inplace=True),
+        #     nn.Linear(96, latent_dim),
+        # )
+
+        # self.decoder = nn.Sequential(
+        #     nn.Linear(latent_dim, 96),
+        #     nn.BatchNorm1d(96),
+        #     nn.LeakyReLU(alpha_lrelu, inplace=True),
+
+        #     nn.Linear(96, 192),
+        #     nn.BatchNorm1d(192),
+        #     nn.LeakyReLU(alpha_lrelu, inplace=True),
+
+        #     nn.Linear(192, input_dim)
+        # )
+
         self.encoder = nn.Sequential(
-            nn.Linear(input_dim, 192),
-            nn.BatchNorm1d(192),
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
             nn.LeakyReLU(alpha_lrelu, inplace=True),
-            nn.Linear(192, 96),
-            nn.BatchNorm1d(96),
+            nn.Dropout(dropout_rate),  # Regolarizzazione aggiuntiva
+            
+            nn.Linear(256, 128),
+            nn.BatchNorm1d(128),
             nn.LeakyReLU(alpha_lrelu, inplace=True),
-            nn.Linear(96, latent_dim),
+            nn.Dropout(dropout_rate),
+            
+            nn.Linear(128, 64),
+            nn.BatchNorm1d(64),
+            nn.LeakyReLU(alpha_lrelu, inplace=True),
+            
+            nn.Linear(64, latent_dim),  # Ultimo layer senza attivazione!
         )
-
+    
+        # Decoder simmetrico
         self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, 96),
-            nn.BatchNorm1d(96),
+            nn.Linear(latent_dim, 64),
+            nn.BatchNorm1d(64),
             nn.LeakyReLU(alpha_lrelu, inplace=True),
-
-            nn.Linear(96, 192),
-            nn.BatchNorm1d(192),
+            
+            nn.Linear(64, 128),
+            nn.BatchNorm1d(128),
             nn.LeakyReLU(alpha_lrelu, inplace=True),
-
-            nn.Linear(192, input_dim)
+            
+            nn.Linear(128, 256),
+            nn.BatchNorm1d(256),
+            nn.LeakyReLU(alpha_lrelu, inplace=True),
+            
+            nn.Linear(256, input_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

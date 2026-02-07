@@ -1,6 +1,7 @@
 **/__pycache__/
 /data_analysis/verify_metrics.py
-/data
+/data/2024-main
+/data/2025-main
 /.venv
 .IoT
 ./neural_model/pyvenv.cfg
