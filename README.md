@@ -1,4 +1,4 @@
-# Driving Style Model
+# RacingDNA
 
 Analisi dello stile di guida in Formula 1 utilizzando reti neurali (VAE/AutoEncoder) per clusterizzare i dati telemetrici delle curve.
 
