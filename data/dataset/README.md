@@ -1,6 +1,14 @@
 # ReadmeDataset
 
-Questo file spiega la struttura e il funzionamento del dataset `data/dataset/dataset_curves_2024_2025.csv` e la logica di estrazione delle curve implementata in `CurveDetector.py`.
+> [!NOTE]
+> **Dataset Overview**
+> Questa repository include:
+> - **Dataset curve 2024-2025**: Include sessioni di **Gara** e **Qualifica**.
+> - **Normalizzazione**: I dati sono già processati e normalizzati (vedi sotto).
+> - **Dati Raw 2025**: Sono inclusi i dati grezzi della stagione 2025.
+>
+> **Credits**: I dati raw telemetrici provengono da [**TracingInsights** su Hugging Face](https://huggingface.co/tracinginsights).
+
 
 ## Struttura del Dataset
 

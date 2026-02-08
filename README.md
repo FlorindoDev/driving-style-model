@@ -26,8 +26,12 @@ pip install -e .
 Il dataset completo utilizzato per il training di questo modello, inclusa la normalizzazione e la struttura dettagliata, è disponibile su Hugging Face:
 [**FlorindoDev/f1_corner_telemetry_2024_2025**](https://huggingface.co/datasets/FlorindoDev/f1_corner_telemetry_2024_2025)
 
+> [!NOTE]
+> **Credits**: I dati raw telemetrici originali sono stati ottenuti da [**TracingInsights-Archive**](https://github.com/TracingInsights-Archive).
+
+
 Per dettagli sulla struttura del file `.csv`, la logica di estrazione delle curve, il padding e la normalizzazione, consulta la documentazione dedicata:
-[**Vai alla documentazione del Dataset**](data/dataset/ReadmeDataset.md)
+[**Vai alla documentazione del Dataset**](data/dataset/README.md)
 
 ## Utilizzo
 
@@ -40,6 +44,13 @@ Lo script `src/scripts/train.py` è il cuore del progetto e gestisce diverse fas
 2.  **Encoding**: Utilizza il modello addestrato per comprimere tutte le curve del dataset nello spazio latente.
 3.  **Clustering**: Applica l'algoritmo K-Means sullo spazio latente per identificare gruppi (cluster) di stili di guida simili.
 4.  **Visualizzazione**: Genera grafici 2D/3D dello spazio latente e dei cluster.
+
+> [!IMPORTANT]
+> **Nota sui Pesi Pre-addestrati**
+> Per ottenere risultati coerenti utilizzando i pesi inclusi (`src/models/weights/VAE_32z_weights.pth`) e i centroidi (`src/models/weights/kmeans_centroids.npy`), è **fondamentale** utilizzare il **dataset normalizzato** specifico disponibile su Hugging Face:
+> [**f1_corner_telemetry_2024_2025/tree/main**](https://huggingface.co/datasets/FlorindoDev/f1_corner_telemetry_2024_2025/tree/main).
+>
+> L'uso di un dataset diverso o ri-normalizzato localmente renderà i pesi e i centroidi non validi.
 
 **Cosa puoi fare**:
 - **Configurare i percorsi**: Modifica `dataset_path`, `load_weights_path` ecc. in `TrainConfig`.
@@ -63,7 +74,16 @@ Lo script `src/scripts/evaluate.py` serve per applicare il modello addestrato a 
 3.  Estrae e normalizza le curve usando le statistiche del dataset originale.
 4.  Proietta ogni curva nello spazio latente e le assegna al cluster più vicino.
 
+**Dove trovare i dati per la valutazione**:
+Per provare lo script, hai bisogno di due file per ogni sessione: il file della telemetria (es. `4_tel.json` per Norris) e il file delle curve (`corners.json`) per quel tracciato.
+
+Puoi scaricarli da:
+- **Hugging Face**: Nella cartella [**data/2025-main** del dataset](https://huggingface.co/datasets/FlorindoDev/f1_corner_telemetry_2024_2025/tree/main/data/2025-main) trovi esempi già organizzati.
+- **TracingInsights Archive**: Puoi scaricare i dati grezzi direttamente dalla [repository originale 2025](https://github.com/TracingInsights-Archive/2025).
+    - *Nota*: Assicurati di scaricare anche il file `corners.json` corrispondente al Gran Premio.
+
 **Cosa puoi fare**:
+
 - **Analizzare un pilota**: Cambia `telemetry_path` per puntare al file JSON della sessione che ti interessa.
 - **Confrontare stili**: Esegui lo script su giri diversi per vedere se lo stile di guida (cluster ID) cambia.
 - **Verificare l'output**: Lo script stampa per ogni curva l'ID del cluster assegnato e una statistica finale (es. "Dominant style: Cluster 2").
