@@ -11,7 +11,7 @@ from sklearn.cluster import KMeans
 
 from src.models.auto_encoder import AutoEncoder
 from src.models.VAE import VAE
-from src.models.dataset_loader import load_and_split_dataset, load_dataset
+from src.models.dataset_loader import load_and_split_dataset, load_dataset, download_dataset_from_hf
 
 
 # =============================================================================
@@ -26,6 +26,9 @@ class TrainConfig:
     load_weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     save_weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     centroids_path: str = "src/models/weights/kmeans_centroids.npy"
+    
+    # ----- Hugging Face -----
+    download_from_hf: bool = False     # True = download dataset from HF
     
     # ----- Model -----
     use_vae: bool = True              # True = VAE, False = AutoEncoder
@@ -64,6 +67,9 @@ CONFIG = TrainConfig(
     load_weights_path="src/models/weights/VAE_32z_weights.pth",
     save_weights_path="src/models/weights/VAE_32z_weights.pth",
     centroids_path="src/models/weights/kmeans_centroids.npy",
+    
+    # Hugging Face
+    download_from_hf=False,
     
     # Model
     use_vae=True,
@@ -366,12 +372,18 @@ def main(config: TrainConfig = CONFIG):
     print("Latent Space Analysis - Driving Style Model")
     print("=" * 60)
     
+    # Download dataset from HF if configured
+    dataset_path = config.dataset_path
+    if config.download_from_hf:
+        print("\n[0/7] Downloading dataset from Hugging Face...")
+        dataset_path = download_dataset_from_hf(filename=config.dataset_path)
+    
     # Load and split dataset
     print("\n[1/7] Loading and splitting dataset...")
-    dataset = load_and_split_dataset(config.dataset_path, train_ratio=config.train_ratio)
+    dataset = load_and_split_dataset(dataset_path, train_ratio=config.train_ratio)
     
     # Per encoding/clustering usiamo tutti i dati originali
-    full_data, full_mask, mean, std = load_dataset(config.dataset_path)
+    full_data, full_mask, mean, std = load_dataset(dataset_path)
     
     # Initialize or load model
     if config.train_model:

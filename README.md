@@ -64,6 +64,10 @@ Lo script `src/scripts/train.py` è il cuore del progetto e gestisce diverse fas
 python -m src.scripts.train
 ```
 
+**Download automatico da Hugging Face**:
+
+Puoi abilitare il download automatico del dataset normalizzato impostando `download_from_hf = True` nella config.
+
 ### 2. Valutazione Singola Sessione
 
 Lo script `src/scripts/evaluate.py` serve per applicare il modello addestrato a **nuovi dati** (es. un giro specifico di un pilota).
@@ -74,31 +78,41 @@ Lo script `src/scripts/evaluate.py` serve per applicare il modello addestrato a 
 3.  Estrae e normalizza le curve usando le statistiche del dataset originale.
 4.  Proietta ogni curva nello spazio latente e le assegna al cluster più vicino.
 
-**Dove trovare i dati per la valutazione**:
-Per provare lo script, hai bisogno di due file per ogni sessione: il file della telemetria (es. `4_tel.json` per Norris) e il file delle curve (`corners.json`) per quel tracciato.
+**Download automatico da Hugging Face**:
 
-Puoi scaricarli da:
-- **Hugging Face**: Nella cartella [**data/2025-main** del dataset](https://huggingface.co/datasets/FlorindoDev/f1_corner_telemetry_2024_2025/tree/main/data/2025-main) trovi esempi già organizzati.
-- **TracingInsights Archive**: Puoi scaricare i dati grezzi direttamente dalla [repository originale 2025](https://github.com/TracingInsights-Archive/2025).
-    - *Nota*: Assicurati di scaricare anche il file `corners.json` corrispondente al Gran Premio.
+Lo script supporta il download automatico dei dati:
+- `download_from_hf = True`: Scarica il dataset normalizzato
+- `download_raw_from_hf = True`: Scarica i dati telemetrici grezzi (cartella `2024-main` o `2025-main`)
 
 **Cosa puoi fare**:
-
-- **Analizzare un pilota**: Cambia `telemetry_path` per puntare al file JSON della sessione che ti interessa.
-- **Confrontare stili**: Esegui lo script su giri diversi per vedere se lo stile di guida (cluster ID) cambia.
-- **Verificare l'output**: Lo script stampa per ogni curva l'ID del cluster assegnato e una statistica finale (es. "Dominant style: Cluster 2").
+- **Analizzare un pilota**: Cambia `telemetry_path` per puntare al file JSON della sessione.
+- **Confrontare stili**: Esegui lo script su giri diversi per vedere se lo stile cambia.
+- **Verificare l'output**: Lo script stampa per ogni curva l'ID del cluster assegnato.
 
 ```bash
 python -m src.scripts.evaluate
+```
+
+### 3. Visualizzazione Curve
+
+Lo script `src/analysis/curve_visualizer.py` permette di **visualizzare le curve** rilevate da un file di telemetria.
+
+**Cosa puoi fare**:
+- Vedere graficamente le curve estratte da una sessione
+- Visualizzare le traiettorie delle curve sul tracciato
+- Scaricare automaticamente i raw data da HF con `download_from_hf = True`
+
+```bash
+python -m src.analysis.curve_visualizer
 ```
 
 ## Struttura Progetto
 
 ```
 src/
-├── analysis/       # Curve detection (CurveDetector.py) e preprocessing
-├── models/         # Definizioni AutoEncoder/VAE e gestione dataset
+├── analysis/       # Curve detection, preprocessing e curve_visualizer.py
+├── models/         # AutoEncoder/VAE, dataset_loader.py (con download HF)
 └── scripts/        # train.py, evaluate.py
 data/
-└── dataset/        # Dataset normalizzati e documentazione (ReadmeDataset.md)
+└── dataset/        # Dataset normalizzati e documentazione
 ```

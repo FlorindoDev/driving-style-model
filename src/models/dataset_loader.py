@@ -4,9 +4,116 @@ Dataset Loader per Neural Model
 Gestisce il caricamento del dataset normalizzato e lo split train/validation.
 """
 
+import os
 import numpy as np
 from typing import Tuple, Optional
 from dataclasses import dataclass
+
+
+# =============================================================================
+# HUGGING FACE DOWNLOAD
+# =============================================================================
+HF_REPO_ID = "FlorindoDev/f1_corner_telemetry_2024_2025"
+HF_DEFAULT_FILENAME = "data/dataset/normalized_dataset_2024_2025.npz"
+
+
+def download_raw_telemetry_from_hf(
+    subfolder: str = "2025-main",
+    repo_id: str = HF_REPO_ID,
+    local_dir: str = "data",
+    force_download: bool = False
+) -> str:
+    """
+    Scarica i dati grezzi della telemetria F1 da Hugging Face.
+    
+    Args:
+        subfolder: Cartella da scaricare (es. "2025-main", "2024-main")
+        repo_id: ID del repository HF
+        local_dir: Directory locale dove salvare i file
+        force_download: Se True, riscarica anche se esiste già
+        
+    Returns:
+        Path locale della cartella scaricata
+    """
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        raise ImportError(
+            "huggingface_hub non installato. Installa con: pip install huggingface_hub"
+        )
+    
+    local_path = os.path.join(local_dir, subfolder)
+    
+    # Se esiste già e non forziamo, ritorna il path
+    if os.path.exists(local_path) and not force_download:
+        print(f"Raw telemetry già presente: {local_path}")
+        return local_path
+    
+    print(f"Scaricando raw telemetry da Hugging Face...")
+    print(f"  Repo: {repo_id}")
+    print(f"  Subfolder: {subfolder}")
+    
+    # Scarica l'intera cartella usando snapshot_download con allow_patterns
+    downloaded_path = snapshot_download(
+        repo_id=repo_id,
+        repo_type="dataset",
+        local_dir=local_dir,
+        allow_patterns=f"{subfolder}/**",
+        force_download=force_download
+    )
+    
+    result_path = os.path.join(downloaded_path, subfolder)
+    print(f"Raw telemetry scaricata: {result_path}")
+    return result_path
+
+
+def download_dataset_from_hf(
+    filename: str = HF_DEFAULT_FILENAME,
+    repo_id: str = HF_REPO_ID,
+    local_dir: str = ".",
+    force_download: bool = False
+) -> str:
+    """
+    Scarica il dataset normalizzato da Hugging Face.
+    
+    Args:
+        filename: Path del file nel repo HF (es. "data/dataset/normalized_dataset_2024_2025.npz")
+        repo_id: ID del repository HF
+        local_dir: Directory locale dove salvare il file
+        force_download: Se True, riscarica anche se esiste già
+        
+    Returns:
+        Path locale del file scaricato
+    """
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        raise ImportError(
+            "huggingface_hub non installato. Installa con: pip install huggingface_hub"
+        )
+    
+    local_path = os.path.join(local_dir, filename)
+    
+    # Se esiste già e non forziamo, ritorna il path
+    if os.path.exists(local_path) and not force_download:
+        print(f"Dataset già presente: {local_path}")
+        return local_path
+    
+    print(f"Scaricando dataset da Hugging Face...")
+    print(f"  Repo: {repo_id}")
+    print(f"  File: {filename}")
+    
+    # Scarica il file
+    downloaded_path = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        repo_type="dataset",
+        local_dir=local_dir,
+        force_download=force_download
+    )
+    
+    print(f"Dataset scaricato: {downloaded_path}")
+    return downloaded_path
 
 
 @dataclass

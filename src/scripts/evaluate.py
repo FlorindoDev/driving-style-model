@@ -10,6 +10,7 @@ from src.analysis.dataset_normalization import (
 )
 from src.models.auto_encoder import AutoEncoder
 from src.models.VAE import VAE
+from src.models.dataset_loader import download_dataset_from_hf, download_raw_telemetry_from_hf
 
 
 # =============================================================================
@@ -20,8 +21,8 @@ class EvaluateConfig:
     """Configuration for telemetry evaluation."""
     
     # ----- Paths -----
-    telemetry_path: str = "data/2025-main/Australian Grand Prix/Qualifying/ALB/4_tel.json"
-    corners_path: str = "data/2025-main/Australian Grand Prix/Race/corners.json"
+    telemetry_path: str = "data/2025-main/Italian Grand Prix/Qualifying/LEC/1_tel.json"
+    corners_path: str = "data/2025-main/Italian Grand Prix/Race/corners.json"
     weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     dataset_path: str = "data/dataset/normalized_dataset_2024_2025.npz"
     centroids_path: str = "src/models/weights/kmeans_centroids.npy"
@@ -29,6 +30,11 @@ class EvaluateConfig:
     # ----- Model -----
     use_vae: bool = True
     latent_dim: int = 32
+    
+    # ----- Hugging Face -----
+    download_from_hf: bool = False  # True = download normalized dataset from HF
+    download_raw_from_hf: bool = False  # True = download raw telemetry from HF
+    raw_data_subfolder: str = "2025-main"  # Subfolder to download (2024-main or 2025-main)
     
     # ----- Clustering -----
     num_clusters: int = 4
@@ -151,16 +157,25 @@ def main(config: EvaluateConfig = CONFIG):
     print("Telemetry Evaluation")
     print("=" * 60)
     
-    # 1. Load dataset stats
-    print("\n[1/4] Loading dataset...")
-    data, _, mean, std, _ = load_normalized_data(config.dataset_path)
+    # 0. Download raw telemetry if configured
+    if config.download_raw_from_hf:
+        print("\n[0/5] Downloading raw telemetry from Hugging Face...")
+        download_raw_telemetry_from_hf(subfolder=config.raw_data_subfolder)
+    
+    # 1. Load dataset stats (download from HF if configured)
+    print("\n[1/5] Loading dataset...")
+    dataset_path = config.dataset_path
+    if config.download_from_hf:
+        print("Downloading dataset from Hugging Face...")
+        dataset_path = download_dataset_from_hf(filename=config.dataset_path)
+    data, _, mean, std, _ = load_normalized_data(dataset_path)
     
     # 2. Load model
-    print("\n[2/4] Loading model...")
+    print("\n[2/5] Loading model...")
     model = load_model(data.shape[1], config)
     
     # 3. Normalize telemetry (uses normalize_telemetry_json!)
-    print("\n[3/4] Processing telemetry...")
+    print("\n[3/5] Processing telemetry...")
     normalized_curves = normalize_telemetry_json(
         config.telemetry_path,
         config.corners_path,
@@ -173,7 +188,7 @@ def main(config: EvaluateConfig = CONFIG):
         return
     
     # 4. Get KMeans (load or fit)
-    print("\n[4/4] Clustering...")
+    print("\n[4/5] Clustering...")
     if config.load_centroids and os.path.exists(config.centroids_path):
         kmeans = load_kmeans_centroids(config.centroids_path, config.num_clusters, config.random_state)
     else:
@@ -181,6 +196,7 @@ def main(config: EvaluateConfig = CONFIG):
     
     results = predict_clusters(normalized_curves, model, kmeans)
     
+    print("\n[5/5] Results:")
     print_results(results, config.num_clusters)
 
 
