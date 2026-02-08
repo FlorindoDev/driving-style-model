@@ -6,8 +6,8 @@ Analisi dello stile di guida in Formula 1 utilizzando reti neurali (VAE/AutoEnco
 
 ```bash
 # 1. Clona il repository
-git clone https://github.com/FlorindoDev/driving-style-model.git
-cd driving-style-model
+git clone https://github.com/FlorindoDev/RacingDNA
+cd RacingDNA
 
 # 2. Crea ambiente virtuale (consigliato)
 python -m venv .venv
