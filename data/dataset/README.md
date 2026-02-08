@@ -1,4 +1,117 @@
-# ReadmeDataset
+# Readme Dataset
+
+> [!NOTE]
+> **Dataset Overview**
+> This repository includes:
+> - **2024-2025 Curve Dataset**: Includes **Race** and **Qualifying** sessions.
+> - **Normalization**: Data is already processed and normalized (see below).
+> - **2025 Raw Data**: Raw data from the 2025 season is included.
+>
+> **Credits**: Raw telemetry data is sourced from [**TracingInsights** on Hugging Face](https://huggingface.co/tracinginsights).
+
+## Dataset Structure
+
+The dataset is a CSV file where each row represents a specific curve taken by a driver in a given lap.
+
+### Identification Columns
+The first columns provide metadata for the event and the curve:
+- `GrandPrix`: Grand Prix.
+- `Session`: Session (e.g., Race).
+- `Driver`: Driver (e.g., ALB).
+- `Lap`: Lap number.
+- `CornerID`: Numeric identifier of the curve.
+- `Compound`: Tire compound.
+- `TireLife`: Tire life.
+- `Stint`: Stint number.
+
+### Telemetry Data (Time Series)
+The subsequent columns contain telemetry data sampled within the curve. Each feature has 50 dedicated columns (indexed 0 to 49), corresponding to time samples.
+
+The included features are:
+- `speed_[0-49]`: Speed.
+- `rpm_[0-49]`: Engine RPM.
+- `throttle_[0-49]`: Throttle percentage.
+- `brake_[0-49]`: Brake percentage.
+- `acc_x`, `acc_y`, `acc_z` `_[0-49]`: Accelerations along the three axes.
+- `x`, `y`, `z` `_[0-49]`: Spatial coordinates.
+- `distance_[0-49]`: Distance traveled in the lap.
+- `time_[0-49]`: Lap timestamp.
+
+### Padding
+The dataset uses **padding** to ensure a fixed size of 50 points per curve.
+- **Padding Value**: `-1000.0`
+- If a curve has fewer than 50 sampled points, the remaining values are filled with `-1000.0`.
+
+---
+
+## Curve Extraction Logic
+
+The logic for identifying and "cutting" curves from the continuous telemetry stream is defined in `src/analysis/CurveDetector.py`. The process aims to isolate driver behavior in each single curve while ensuring structural consistency for the dataset.
+
+The process occurs in 4 main phases:
+
+### 1. Search Window Definition (Spatial Bounding Box)
+For each known curve (defined in the `corners.json` file), the algorithm restricts analysis to a specific portion of the track to avoid false positives from other curves.
+- The time index corresponding to the **geometric apex point** of the curve (the trajectory point closest to the theoretical apex X,Y coordinates) is identified.
+- A search window (`lower_bound` and `upper_bound`) is defined based on distance traveled (`distance`):
+  - **Window Start**: Typically 150 meters before the apex (or halfway to the previous curve if very close).
+  - **Window End**: Typically 250 meters after the apex (or halfway to the next curve).
+
+### 2. Physical Detection (G-Force Thresholds)
+Within this spatial window, the algorithm searches for the actual start and end of the cornering action by analyzing lateral acceleration (`acc_y`).
+- **Smoothing**: The `acc_y` signal is first filtered with a moving average (3-sample window) to reduce noise.
+- **Curve Entry**: Triggered when `|acc_y_smooth| > 3.0 G`.
+- **Curve Exit**: Deactivated when `|acc_y_smooth| < 2.5 G`.
+Using two different thresholds (Hysteresis) prevents premature exits due to small fluctuations in G-force during cornering.
+
+### 3. Apex Validation
+A sequence of points identified as a "curve" in the previous step is considered valid only if it **includes the apex index**.
+- If the algorithm detects a G-force peak that starts and ends *before* the apex, it is discarded.
+- This ensures that the extracted data is actually related to traversing the target curve and not to adjacent corrections or maneuvers.
+
+### 4. Cutting and Centering (Clamping)
+To standardize the sequence length for neural network input, a hard cut (Clamping) is applied based on the apex position.
+- Regardless of what is detected with G-forces, the extracted curve **cannot extend beyond 25 samples** before and after the apex.
+- **Start**: If the detected entry is more than 25 samples *before* the apex, it is cut to `apex - 25`.
+- **End**: If the detected exit is more than 25 samples *after* the apex, it is cut to `apex + 25`.
+
+### Final Result
+The result is a time window of **maximum 50 samples** (slice `[start:end]`) centered on the apex.
+- If the curve is very long and fast, it will be truncated at the +/- 25 margins.
+- If the curve is short (e.g., slow chicane or quick exit), the window will be fewer than 50 samples. In this case, the **padding** (`-1000.0` values) described above intervenes to fill the empty columns up to 50.
+
+## Data Normalization
+
+Data normalization is handled by the `src/analysis/dataset_normalization.py` script and follows specific logic to preserve the temporal and structural consistency of the curves.
+
+### 1. Grouping by Feature (Grouped Stats)
+Columns representing the same physical quantity over time (e.g., from `speed_0` to `speed_49`) are treated as a single group.
+- Instead of calculating mean and standard deviation for each individual time column (which could introduce artifacts if the distribution varies along the curve), a **global statistic** is calculated for the entire feature.
+- **Example**: The mean of `speed` is calculated on all samples of all curves (all rows, columns 0-49).
+
+### 2. Padding Management
+During statistics calculation and normalization, padding values (`-1000.0`) are strictly ignored.
+- **Statistics Calculation**: Padding values are replaced with `NaN` before calculating mean and standard deviation to avoid skewing results.
+- **Normalized Output**: In the final normalized dataset, padding values are explicitly set to **0.0**. This is important for neural network input (especially if using masking or zero-padding mechanisms).
+
+### 3. Z-Score Normalization
+The normalization applied is **Z-Score** (Standardization):
+\[ x_{norm} = \frac{x - \mu}{\sigma} \]
+Where $\mu$ and $\sigma$ are the global mean and standard deviation of the feature group to which $x$ belongs.
+
+### 4. Categorical Variable Encoding
+The `Compound` column undergoes different treatment:
+- **One-Hot Encoding** is applied for categories: `HARD`, `INTERMEDIATE`, `WET`, `MEDIUM`, `SOFT`.
+- This generates 5 additional binary columns (e.g., `Compound_SOFT`, `Compound_MEDIUM`...) which are not Z-Score normalized (remaining 0/1).
+
+The result is saved in an `.npz` file containing:
+- `data`: Matrix of normalized data.
+- `mask`: Binary matrix (1=valid, 0=padding).
+- `mean`, `std`: Vectors to denormalize data (e.g., to reconstruct original curves).
+
+---
+
+# Readme Dataset (Italiano)
 
 > [!NOTE]
 > **Dataset Overview**
