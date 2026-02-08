@@ -82,8 +82,8 @@ CONFIG = TrainConfig(
     num_samples=1127865,
     num_clusters=4,
     random_state=0,
-    save_centroids=True,
-    load_centroids=False,
+    save_centroids=False,
+    load_centroids=True,
     
     # Visualization
     show_latent_space_2d=False,
