@@ -11,6 +11,11 @@ Il cuore del progetto consiste nell'analizzare le telemetrie di Formula 1 per id
     -   **Bound spaziali**: Definizione di un'area di interesse attorno all'apice della curva basata sulla mappa del circuito (`corners.json`).
     -   **Finestre e Smoothing**: Applicazione di una *moving average* sull'accelerazione laterale (`acc_y`) per ridurre il rumore.
     -   **Thresholding con Isteresi**: L'ingresso in curva è rilevato quando la forza G supera una soglia (`ACC_ENTER_THR`, default 3.0 G), mentre l'uscita avviene quando scende sotto una soglia inferiore (`ACC_EXIT_THR`, default 2.5 G), garantendo stabilità nella rilevazione.
+    -   **Analisi Gomme**: Per estrarre informazioni su mescola e vita degli pneumatici, è necessario che il file `laptimes.json` sia presente nella stessa cartella della telemetria.
+
+    > [!IMPORTANT]
+    > **Requisito Fondamentale per Analisi Gomme**:
+    > Per far sì che lo script estragga correttamente la **mescola** e la **vita** degli pneumatici, è **obbligatorio** che il file `laptimes.json` sia presente nella **stessa cartella** del file di telemetria (es. `1_tel.json`). Senza questo file, le informazioni sulle gomme **non saranno disponibili**.
 
 2.  **Costruzione e Normalizzazione Dataset** (`src/analysis/dataset_normalization.py`):
     Le curve estratte vengono raccolte in un dataset. Viene applicata una **Z-score normalization** (sottrazione della media e divisione per la deviazione standard) calcolata sull'intero dataset per rendere i dati omogenei e adatti all'addestramento della rete neurale.
@@ -40,6 +45,7 @@ Di seguito i dettagli degli input e output specifici per ogni script principale 
 #### 2. `src/scripts/evaluate.py` (Valutazione Telemetria)
 *   **Input**:
     *   **Telemetria Grezza**: File `.json` di una sessione (es. `1_tel.json`).
+    *   **Laptimes**: File `laptimes.json` nella stessa cartella della telemetria (necessario per info su mescola e vita gomma).
     *   **Mappa Curve**: File `corners.json` relativo al circuito.
     *   **Modello**: Pesi del VAE/AutoEncoder (`.pth`).
     *   **Dataset Normalizzato**: Necessario per caricare le statistiche (media/std) usate per la normalizzazione.
@@ -51,6 +57,7 @@ Di seguito i dettagli degli input e output specifici per ogni script principale 
 #### 3. `src/analysis/curve_visualizer.py` (Visualizzazione Curve)
 *   **Input**:
     *   **Telemetria Grezza**: File `.json` della sessione.
+    *   **Laptimes**: File `laptimes.json` nella stessa cartella della telemetria (necessario per info su mescola e vita gomma).
     *   **Mappa Curve**: File `corners.json` del circuito.
 *   **Output**:
     *   **Grafici Segnali**: Plot dei canali telemetrici (Accelerazione Laterale, Freno, Acceleratore) per ogni curva rilevata.
