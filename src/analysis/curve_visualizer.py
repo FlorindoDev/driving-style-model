@@ -19,7 +19,8 @@ class VisualizerConfig:
     raw_data_subfolder: str = "2025-main"  # Subfolder to download (2024-main or 2025-main)
     
     # ----- Visualization -----
-    show_track: bool = False  # Show track overview with curves
+    show_track: bool = False    # Show track overview with curves
+    show_score: bool = False     # Show pushing score
 
 
 CONFIG = VisualizerConfig()
@@ -52,6 +53,10 @@ def main(config: VisualizerConfig = CONFIG):
     print("\n[3/3] Visualizing...")
     curve_detector.grafico(curves, config.show_track)
     curve_detector.plot_curve_trajectories(curves)
+
+    if config.show_score:
+        for curve in curves:
+            curve.plot_all()
     
     print("\n" + "=" * 60)
     print("Done!")
