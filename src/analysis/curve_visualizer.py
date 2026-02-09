@@ -11,8 +11,8 @@ class VisualizerConfig:
     """Configuration for curve visualization."""
     
     # ----- Paths -----
-    telemetry_path: str = "data/2025-main/Italian Grand Prix/Race/LEC/1_tel.json"
-    corners_path: str = "data/2025-main/Italian Grand Prix/Race/corners.json"
+    telemetry_path: str = "data/2025-main/Australian Grand Prix/Qualifying/NOR/19_tel.json"
+    corners_path: str = "data/2025-main/Australian Grand Prix/Race/corners.json"
     
     # ----- Hugging Face -----
     download_from_hf: bool = True  # True = download raw telemetry from HF
@@ -56,7 +56,7 @@ def main(config: VisualizerConfig = CONFIG):
 
     if config.show_score:
         for curve in curves:
-            curve.plot_all()
+            curve.plot_pushing_analysis()
     
     print("\n" + "=" * 60)
     print("Done!")
