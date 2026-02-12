@@ -125,10 +125,10 @@ The `src/scripts/train.py` script is the heart of the project and manages severa
 >
 > **Cluster Meaning (Default Configuration)**:
 > Using included weights and centroids, the 4 identified clusters have the following meaning:
-> - **Cluster 0**: Maintains a fast pace.
-> - **Cluster 1**: Management (Saving).
-> - **Cluster 2**: Pushing.
-> - **Cluster 3**: Maintains a pace, but slow.
+> - **Cluster 0**: Fast Pace.
+> - **Cluster 1**: Pushing.
+> - **Cluster 2**: Slow Pace.
+> - **Cluster 3**: Saving.
 
 **What you can do**:
 - **Configure paths**: Modify `dataset_path`, `load_weights_path` etc. in `TrainConfig`.
@@ -333,10 +333,10 @@ Lo script `src/scripts/train.py` è il cuore del progetto e gestisce diverse fas
 >
 > **Significato dei Cluster (Configurazione Default)**:
 > Utilizzando i pesi e i centroidi inclusi, i 4 cluster identificati hanno il seguente significato:
-> - **Cluster 0**: Mantiene un passo veloce.
-> - **Cluster 1**: Gestione (Saving).
-> - **Cluster 2**: Spinge (Pushing).
-> - **Cluster 3**: Mantiene un passo, ma lento.
+> - **Cluster 0**: Passo ma veloce.
+> - **Cluster 1**: Pushing.
+> - **Cluster 2**: Passo ma lento.
+> - **Cluster 3**: Saving.
 
 **Cosa puoi fare**:
 - **Configurare i percorsi**: Modifica `dataset_path`, `load_weights_path` ecc. in `TrainConfig`.

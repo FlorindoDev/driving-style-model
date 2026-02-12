@@ -97,12 +97,17 @@ During statistics calculation and normalization, padding values (`-1000.0`) are 
 - **Statistics Calculation**: Padding values are replaced with `NaN` before calculating mean and standard deviation to avoid skewing results.
 - **Normalized Output**: In the final normalized dataset, padding values are explicitly set to **0.0**. This is important for neural network input (especially if using masking or zero-padding mechanisms).
 
-### 3. Z-Score Normalization
+### 3. TireLife Normalization (Relative to Compound)
+Tire life is normalized relative to the maximum life observed for each compound:
+\[ TireLife_{norm} = \frac{TireLife}{MaxLife_{compound}} \]
+Where $MaxLife_{compound}$ varies (e.g., SOFT=30, HARD=50). This results in a value between [0, 1] where 0 is fresh and 1 is end-of-life, making it comparable across compounds.
+
+### 4. Z-Score Normalization
 The normalization applied is **Z-Score** (Standardization):
 \[ x_{norm} = \frac{x - \mu}{\sigma} \]
 Where $\mu$ and $\sigma$ are the global mean and standard deviation of the feature group to which $x$ belongs.
 
-### 4. Categorical Variable Encoding
+### 5. Categorical Variable Encoding
 The `Compound` column undergoes different treatment:
 - **One-Hot Encoding** is applied for categories: `HARD`, `INTERMEDIATE`, `WET`, `MEDIUM`, `SOFT`.
 - This generates 5 additional binary columns (e.g., `Compound_SOFT`, `Compound_MEDIUM`...) which are not Z-Score normalized (remaining 0/1).
@@ -214,12 +219,17 @@ Durante il calcolo delle statistiche e la normalizzazione, i valori di padding (
 - **Calcolo Statistiche**: I valori di padding vengono sostituiti con `NaN` prima di calcolare media e deviazione standard, per non falsare i risultati.
 - **Output Normalizzato**: Nel dataset finale normalizzato, i valori di padding vengono impostati esplicitamente a **0.0**. Questo è importante per l'input delle reti neurali (soprattutto se si usano meccanismi di mascheramento o zero-padding).
 
-### 3. Z-Score Normalization
+### 3. Normalizzazione TireLife (Relativa alla Mescola)
+La vita della gomma viene normalizzata relativamente alla vita massima osservata per ogni mescola:
+\[ TireLife_{norm} = \frac{TireLife}{MaxLife_{compound}} \]
+Dove $MaxLife_{compound}$ varia (es. SOFT=30, HARD=50). Questo produce un valore tra [0, 1] dove 0 è gomma nuova e 1 è fine vita, rendendo il dato confrontabile tra mescole diverse.
+
+### 4. Z-Score Normalization
 La normalizzazione applicata è di tipo **Z-Score** (Standardizzazione):
 \[ x_{norm} = \frac{x - \mu}{\sigma} \]
 Dove $\mu$ e $\sigma$ sono la media e deviazione standard globali del gruppo di feature a cui appartiene $x$.
 
-### 4. Encoding delle Variabili Categoriche
+### 5. Encoding delle Variabili Categoriche
 La colonna `Compound` (mescola) subisce un trattamento diverso:
 - Viene applicato **One-Hot Encoding** per le categorie: `HARD`, `INTERMEDIATE`, `WET`, `MEDIUM`, `SOFT`.
 - Questo genera 5 colonne binarie aggiuntive (es. `Compound_SOFT`, `Compound_MEDIUM`...) che non vengono normalizzate con Z-Score (rimangono 0/1).

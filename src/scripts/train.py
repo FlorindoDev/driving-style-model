@@ -22,10 +22,11 @@ class TrainConfig:
     """Configuration for training and analysis."""
     
     # ----- Paths -----
-    dataset_path: str = "data/dataset/normalized_dataset_2024_2025_WITH_WET.npz"
+    dataset_path: str = "data/dataset/normalized_dataset_2024_2025.npz"
     load_weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     save_weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     centroids_path: str = "src/models/weights/kmeans_centroids.npy"
+    dataset_filename_hf: str = "normalized_dataset_2024_2025.npz"
     
     # ----- Hugging Face -----
     download_from_hf: bool = True     # True = download dataset from HF
@@ -67,9 +68,10 @@ CONFIG = TrainConfig(
     load_weights_path="src/models/weights/VAE_32z_weights.pth",
     save_weights_path="src/models/weights/VAE_32z_weights.pth",
     centroids_path="src/models/weights/kmeans_centroids.npy",
+    dataset_filename_hf = "normalized_dataset_2024_2025.npz",
     
     # Hugging Face
-    download_from_hf=False,
+    download_from_hf=True,
     
     # Model
     use_vae=True,
@@ -377,7 +379,7 @@ def main(config: TrainConfig = CONFIG):
     if config.download_from_hf:
         print("\n[0/7] Downloading dataset from Hugging Face...")
         fpath, fname = os.path.split(config.dataset_path)
-        dataset_path = download_dataset_from_hf(filename=fname, filepath=fpath)
+        dataset_path = download_dataset_from_hf(filename=config.dataset_filename_hf, filepath=fpath)
     
     # Load and split dataset
     print("\n[1/7] Loading and splitting dataset...")

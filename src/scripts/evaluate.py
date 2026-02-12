@@ -26,6 +26,7 @@ class EvaluateConfig:
     weights_path: str = "src/models/weights/VAE_32z_weights.pth"
     dataset_path: str = "data/dataset/normalized_dataset_2024_2025.npz"
     centroids_path: str = "src/models/weights/kmeans_centroids.npy"
+    dataset_filename_hf: str = "normalized_dataset_2024_2025.npz"
     
     # ----- Model -----
     use_vae: bool = True
@@ -168,7 +169,7 @@ def main(config: EvaluateConfig = CONFIG):
     if config.download_from_hf:
         print("Downloading dataset from Hugging Face...")
         fpath, fname = os.path.split(config.dataset_path)
-        dataset_path = download_dataset_from_hf(filename=fname, filepath=fpath)
+        dataset_path = download_dataset_from_hf(filename=config.dataset_filename_hf, filepath=fpath)
     data, _, mean, std, _ = load_normalized_data(dataset_path)
     
     # 2. Load model
