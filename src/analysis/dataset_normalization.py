@@ -31,6 +31,37 @@ PADDING_VALUE = DEFAULT_CONFIG.padding_value
 COMPOUND_CATEGORIES = list(DEFAULT_CONFIG.compound_categories)
 MAX_SAMPLES_PER_CURVE = DEFAULT_CONFIG.max_samples_per_curve
 
+# Massimo TireLife osservato per ogni compound (calcolato dal dataset 2024-2025)
+# Usato per normalizzare TireLife relativamente al compound:
+# TireLifeNorm = TireLife / max_per_compound → [0, 1]
+TIRE_LIFE_MAX_PER_COMPOUND = {
+    'SOFT': 30,
+    'MEDIUM': 40,
+    'HARD': 50,
+    'INTERMEDIATE': 35,
+    'WET': 20,
+}
+# Fallback per compound sconosciuti
+TIRE_LIFE_MAX_DEFAULT = 50
+
+
+def normalize_tire_life(life: float, compound: str) -> float:
+    """
+    Normalizza TireLife relativamente al max del compound.
+    
+    Compound diversi hanno durate diverse: una SOFT con TireLife=10
+    è molto più consumata di una HARD con TireLife=10.
+    
+    Args:
+        life: Valore grezzo di TireLife (laps)
+        compound: Nome del compound (SOFT, MEDIUM, HARD, ...)
+        
+    Returns:
+        TireLife normalizzato in [0, 1] (0=fresca, 1=fine vita)
+    """
+    max_life = TIRE_LIFE_MAX_PER_COMPOUND.get(compound, TIRE_LIFE_MAX_DEFAULT)
+    return min(life / max_life, 1.0)
+
 
 # =============================================================================
 # SINGLE CURVE NORMALIZATION (for inference)
@@ -93,8 +124,11 @@ def curve_to_raw_features(
     padding = config.padding_value
     categories = config.compound_categories
     
-    # Prepare raw features with padding
-    life = curve.life if hasattr(curve, 'life') else 0
+    # Normalize TireLife relative to compound
+    raw_life = curve.life if hasattr(curve, 'life') else 0
+    compound = curve.compound if hasattr(curve, 'compound') else 'UNKNOWN'
+    life = normalize_tire_life(raw_life, compound)
+    
     speed = pad_or_truncate(curve.speed, max_samples, padding)
     rpm = pad_or_truncate(curve.rpm, max_samples, padding)
     throttle = pad_or_truncate(curve.throttle, max_samples, padding)
@@ -484,7 +518,7 @@ def load_normalized_data(
 if __name__ == "__main__":
     # Configuration
     config = NormalizationConfig(
-        input_csv_path="data/dataset/dataset_curves.csv",
+        input_csv_path="data/dataset/dataset_curves_2024_2025.csv",
         output_dir="data/dataset",
         output_filename="normalized_dataset.npz"
     )
@@ -498,9 +532,18 @@ if __name__ == "__main__":
         decimal="."
     )
     
-    # Remove unnecessary columns
+    # Remove unnecessary columns (GrandPrix, Session, Driver, Lap, CornerID)
     df = df.drop(df.columns[:5], axis=1)
+    # Remove Stint (index 2 after dropping first 5)
     df = df.drop(df.columns[2], axis=1)
+    
+    # Normalize TireLife relative to compound BEFORE Z-score
+    # Questo rende il valore comparabile tra compound diversi
+    print("Normalizing TireLife relative to compound...")
+    df['TireLife'] = df.apply(
+        lambda row: normalize_tire_life(row['TireLife'], row['Compound']), axis=1
+    )
+    print(f"  TireLife range after normalization: [{df['TireLife'].min():.4f}, {df['TireLife'].max():.4f}]")
     
     # Remove X, Y, Z columns
     df = df.drop(df.columns[352:502], axis=1)
