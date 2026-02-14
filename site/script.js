@@ -7,7 +7,7 @@
 //  CONFIG
 // ============================================================
 
-const API_BASE = 'http://localhost:5050';
+const API_BASE = '';
 
 const FALLBACK_DRIVERS = [
     { code: 'VER', name: 'Max Verstappen', team: 'Red Bull Racing', color: '#3671C6' },

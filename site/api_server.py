@@ -12,7 +12,9 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 fastf1.Cache.enable_cache(CACHE_DIR)
 
 # ── Flask app ────────────────────────────────────────────────────
-app = Flask(__name__)
+# Explicitly set static_folder to current directory ('.') and url_path to root ('')
+# This ensures Gunicorn serves style.css and script.js correctly from the same folder.
+app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)  # allow cross-origin from file:// or any dev server
 
 # In-memory cache for loaded sessions to avoid re-downloading

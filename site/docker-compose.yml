@@ -1,0 +1,14 @@
+services:
+  racingdna:
+    build: .
+    container_name: racingdna_app
+    ports:
+      - "5050:80"
+    volumes:
+      - fastf1_cache:/fastf1_cache
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+
+volumes:
+  fastf1_cache:

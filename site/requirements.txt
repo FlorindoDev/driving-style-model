@@ -1,0 +1,6 @@
+fastf1
+flask
+flask-cors
+gunicorn
+pandas
+requests
