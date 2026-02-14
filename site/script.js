@@ -386,7 +386,7 @@ function generateLapData(driverCode, sessionType = 'Race') {
 
     const data = [];
     const driverIdx = (state.cache.drivers || FALLBACK_DRIVERS).findIndex(d => d.code === driverCode);
-    let baseTime = 88 + (driverIdx >= 0 ? driverIdx * 0.08 : Math.random());
+    let baseTime = 76 + (driverIdx >= 0 ? driverIdx * 0.08 : Math.random());
     let currentTire = 'SOFT';
     let tireAge = 0;
 
