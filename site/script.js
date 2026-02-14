@@ -1217,7 +1217,7 @@ async function _populateAnalysisLaps() {
             // Note: This function updates window._loadedLapsByDriver
             if (!year || !gp || !session) throw new Error("Session info missing");
             await loadDriverLaps(year, gp, session, driverCode);
-            loadOpt.remove(); // Only remove on success
+            return; // Exit here, because loadDriverLaps already triggered a refresh (_populateAnalysisLaps)
         } catch (e) {
             console.error(e);
             loadOpt.textContent = 'Error: ' + e.message;
