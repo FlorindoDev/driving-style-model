@@ -184,6 +184,27 @@ The `src/analysis/curve_visualizer.py` script allows visualizing corners detecte
 python -m src.analysis.curve_visualizer
 ```
 
+### 4. Web Dashboard & Telemetry Analysis
+
+The project includes a comprehensive web interface for analyzing telemetry, laps, and comparing drivers.
+
+**Option A: Docker (Recommended)**
+Run the full stack (Back-end + Web Server) in a container.
+
+1.  **Start**:
+    ```bash
+    cd site
+    docker-compose up --build -d
+    ```
+2.  **Access**: Open `http://localhost` in your browser.
+
+**Option B: Local Development**
+1.  **Start**:
+    ```bash
+    python site/api_server.py
+    ```
+2.  **Access**: Open `http://localhost:5050` in your browser.
+
 ## Project Structure
 
 ```
@@ -391,6 +412,27 @@ Lo script `src/analysis/curve_visualizer.py` permette di **visualizzare le curve
 ```bash
 python -m src.analysis.curve_visualizer
 ```
+
+### 4. Web Dashboard e Analisi Telemetria
+
+Il progetto include un'interfaccia web completa per analizzare telemetrie, giri e confrontare i piloti.
+
+**Opzione A: Docker (Consigliato)**
+Esegui l'intero stack (Backend + Web Server) in un container.
+
+1.  **Avvio**:
+    ```bash
+    cd site
+    docker-compose up --build -d
+    ```
+2.  **Accesso**: Apri `http://localhost` nel browser.
+
+**Opzione B: Sviluppo Locale**
+1.  **Avvio**:
+    ```bash
+    python site/api_server.py
+    ```
+2.  **Accesso**: Apri `http://localhost:5050` nel browser.
 
 ## Struttura Progetto
 

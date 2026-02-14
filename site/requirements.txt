@@ -4,3 +4,6 @@ flask-cors
 gunicorn
 pandas
 requests
+torch
+scikit-learn
+numpy

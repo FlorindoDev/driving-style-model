@@ -33,6 +33,9 @@ const state = {
     }
 };
 
+window._loadedDrivers = [];
+window._loadedLapsByDriver = {};
+
 // ============================================================
 //  CHART INSTANCES & CROSSHAIR STATE
 // ============================================================
@@ -89,6 +92,9 @@ async function loadDriversFromAPI(year, gp, session) {
         if (drivers && drivers.length > 0) {
             differentiateTeamColors(drivers);
             state.cache.drivers = drivers;
+            window._loadedDrivers = drivers;
+            _populateAnalysisDrivers();
+            _populateAnalysisLaps();
         } else {
             state.cache.drivers = [...FALLBACK_DRIVERS];
         }
@@ -242,6 +248,11 @@ async function loadDriverLaps(year, race, session, driverCode) {
         const resp = await fetch(url);
         if (!resp.ok) throw new Error(`Laps API failed for ${driverCode}`);
         const laps = await resp.json();
+
+        // Store full lap list for Analysis section
+        if (!window._loadedLapsByDriver) window._loadedLapsByDriver = {};
+        window._loadedLapsByDriver[driverCode] = laps;
+        _populateAnalysisLaps();
 
         if (laps && laps.length > 0) {
             state.cache.lapData[driverCode] = laps.map(l => ({
@@ -1019,4 +1030,329 @@ function lightenColor(hex, amount) {
     const g = Math.min(255, parseInt(hex.substring(2, 4), 16) + amount);
     const b = Math.min(255, parseInt(hex.substring(4, 6), 16) + amount);
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+
+// ============================================================
+//  ANALYSIS SECTION — Navigation, Track Map, Corner Cards
+// ============================================================
+
+const CLUSTER_COLORS_DEFAULT = {
+    0: '#3498db',
+    1: '#e74c3c',
+    2: '#f39c12',
+    3: '#2ecc71',
+};
+const CLUSTER_NAMES_DEFAULT = {
+    0: 'Fast Pace', 1: 'Pushing', 2: 'Slow Pace', 3: 'Saving',
+};
+
+let _analysisData = null;       // cached latest analysis response
+let _trackTransform = null;     // { minX, minY, scale, offsetX, offsetY, canvasH }
+
+// ── Page navigation ──────────────────────────────────────────
+document.querySelectorAll('.main-nav a[data-page]').forEach(link => {
+    link.addEventListener('click', e => {
+        e.preventDefault();
+        const page = link.dataset.page;
+
+        // Toggle active class
+        document.querySelectorAll('.main-nav a').forEach(a => a.classList.remove('active'));
+        link.classList.add('active');
+
+        // Close mobile nav
+        document.getElementById('main-nav').classList.remove('open');
+
+        const telemetrySection = document.querySelector('.charts-container');
+        const driverSidebar = document.querySelector('.driver-sidebar');
+        const analysisSection = document.getElementById('analysis-section');
+        const lapBar = document.getElementById('lap-selector-bar');
+
+        if (page === 'analysis') {
+            if (telemetrySection) telemetrySection.style.display = 'none';
+            if (driverSidebar) driverSidebar.style.display = 'none';
+            if (lapBar) lapBar.style.display = 'none';
+            if (analysisSection) analysisSection.style.display = 'block';
+            _populateAnalysisDrivers();
+        } else {
+            if (telemetrySection) telemetrySection.style.display = '';
+            if (driverSidebar) driverSidebar.style.display = '';
+            if (lapBar) lapBar.style.display = '';
+            if (analysisSection) analysisSection.style.display = 'none';
+        }
+    });
+});
+
+// ── Hamburger toggle ─────────────────────────────────────────
+document.getElementById('nav-toggle')?.addEventListener('click', () => {
+    document.getElementById('main-nav').classList.toggle('open');
+});
+
+// ── Populate analysis driver & lap selects ───────────────────
+function _populateAnalysisDrivers() {
+    const sel = document.getElementById('analysis-driver');
+    if (!sel) return;
+    sel.innerHTML = '';
+    const src = window._loadedDrivers || [];
+    if (src.length === 0) {
+        sel.innerHTML = '<option value="">Load a session first</option>';
+        return;
+    }
+    src.forEach(d => {
+        const o = document.createElement('option');
+        o.value = d.code;
+        o.textContent = `${d.code} – ${d.name}`;
+        sel.appendChild(o);
+    });
+    _populateAnalysisLaps();
+}
+
+function _populateAnalysisLaps() {
+    const sel = document.getElementById('analysis-lap');
+    if (!sel) return;
+    sel.innerHTML = '<option value="fastest">Fastest Lap</option>';
+    const driverCode = document.getElementById('analysis-driver')?.value;
+    if (!driverCode || !window._loadedLapsByDriver) return;
+    const laps = window._loadedLapsByDriver[driverCode];
+    if (laps) {
+        laps.forEach(l => {
+            const o = document.createElement('option');
+            o.value = l.lap;
+            o.textContent = `Lap ${l.lap}`;
+            sel.appendChild(o);
+        });
+    }
+}
+
+document.getElementById('analysis-driver')?.addEventListener('change', _populateAnalysisLaps);
+
+// ── ANALYZE button ───────────────────────────────────────────
+document.getElementById('analyze-btn')?.addEventListener('click', async () => {
+    const year = document.getElementById('year-select').value;
+    const gp = document.getElementById('race-select').value;
+    const session = document.getElementById('session-select').value;
+    const driver = document.getElementById('analysis-driver').value;
+    const lap = document.getElementById('analysis-lap').value;
+
+    if (!driver) return;
+
+    const btn = document.getElementById('analyze-btn');
+    const loader = btn.querySelector('.btn-loader');
+    const txt = btn.querySelector('.btn-text');
+    const overlay = document.getElementById('analysis-loading');
+
+    loader.style.display = 'inline-block';
+    txt.textContent = 'Analyzing…';
+    btn.disabled = true;
+    overlay.style.display = 'flex';
+
+    try {
+        const url = `${API_BASE}/api/analysis?year=${year}&gp=${encodeURIComponent(gp)}&session=${encodeURIComponent(session)}&driver=${driver}&lap=${lap}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+        _analysisData = await res.json();
+        _renderAnalysis(_analysisData);
+    } catch (err) {
+        alert('Analysis failed: ' + err.message);
+    } finally {
+        loader.style.display = 'none';
+        txt.textContent = '🔬 Analyze Corners';
+        btn.disabled = false;
+        overlay.style.display = 'none';
+    }
+});
+
+// ── Render full analysis ─────────────────────────────────────
+function _renderAnalysis(data) {
+    const colors = data.cluster_colors || CLUSTER_COLORS_DEFAULT;
+    const names = data.cluster_names || CLUSTER_NAMES_DEFAULT;
+
+    // 1. Cluster summary bar
+    const bar = document.getElementById('cluster-summary-bar');
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+        <div class="summary-dominant">
+            <span class="summary-label">Dominant Style</span>
+            <span class="summary-value" style="color:${colors[data.dominant_cluster]}">${data.dominant_name}</span>
+        </div>
+        <div class="summary-chips">
+            ${Object.entries(data.cluster_summary).map(([id, count]) => `
+                <span class="chip" style="--chip-color:${colors[id]}">
+                    <span class="chip-dot" style="background:${colors[id]}"></span>
+                    ${names[id]}: ${count}
+                </span>
+            `).join('')}
+        </div>
+        <div class="summary-total">${data.total_detected} / ${data.total_on_track} corners detected</div>
+    `;
+
+    // 2. Cluster legend
+    const legend = document.getElementById('cluster-legend');
+    legend.innerHTML = Object.entries(names).map(([id, name]) => `
+        <span class="legend-item"><span class="legend-dot" style="background:${colors[id]}"></span>${name}</span>
+    `).join('');
+
+    // 3. Track map
+    _drawTrackMap(data, colors);
+
+    // 4. Corner cards
+    _renderCornerCards(data.corners, colors, names);
+}
+
+// ── Canvas track map ─────────────────────────────────────────
+function _drawTrackMap(data, colors) {
+    const canvas = document.getElementById('trackCanvas');
+    const box = canvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+
+    canvas.width = box.clientWidth * dpr;
+    canvas.height = (box.clientWidth * 0.7) * dpr;
+    canvas.style.width = box.clientWidth + 'px';
+    canvas.style.height = (box.clientWidth * 0.7) + 'px';
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    const W = box.clientWidth;
+    const H = box.clientWidth * 0.7;
+
+    const { x, y } = data.track;
+    const minX = Math.min(...x), maxX = Math.max(...x);
+    const minY = Math.min(...y), maxY = Math.max(...y);
+    const tw = maxX - minX || 1, th = maxY - minY || 1;
+
+    const pad = 50;
+    const scale = Math.min((W - 2 * pad) / tw, (H - 2 * pad) / th);
+    const ox = (W - tw * scale) / 2;
+    const oy = (H - th * scale) / 2;
+
+    _trackTransform = { minX, minY, scale, ox, oy, H };
+    const tx = v => (v - minX) * scale + ox;
+    const ty = v => H - ((v - minY) * scale + oy);   // flip Y
+
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, W, H);
+
+    // Track outline
+    ctx.beginPath();
+    ctx.moveTo(tx(x[0]), ty(y[0]));
+    for (let i = 1; i < x.length; i++) ctx.lineTo(tx(x[i]), ty(y[i]));
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+
+    // Detected corner trajectories
+    for (const c of data.corners) {
+        const cx = c.trajectory.x, cy = c.trajectory.y;
+        if (cx.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(tx(cx[0]), ty(cy[0]));
+        for (let i = 1; i < cx.length; i++) ctx.lineTo(tx(cx[i]), ty(cy[i]));
+        ctx.strokeStyle = colors[c.cluster_id] || '#fff';
+        ctx.lineWidth = 5;
+        ctx.stroke();
+    }
+
+    // Corner markers (all positions)
+    for (const cp of data.corner_positions) {
+        const match = data.corners.find(c => c.corner_id === cp.corner_id);
+        const col = match ? (colors[match.cluster_id] || '#888') : '#555';
+        const px = tx(cp.x), py = ty(cp.y);
+
+        ctx.beginPath();
+        ctx.arc(px, py, 11, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 9px Titillium Web, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cp.corner_id, px, py);
+    }
+
+    // Mouse hover for tooltip
+    canvas.onmousemove = e => _trackMouseMove(e, data, colors);
+    canvas.onmouseleave = () => {
+        document.getElementById('track-tooltip').style.display = 'none';
+    };
+}
+
+function _trackMouseMove(e, data, colors) {
+    const canvas = document.getElementById('trackCanvas');
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const t = _trackTransform;
+    if (!t) return;
+
+    const tx = v => (v - t.minX) * t.scale + t.ox;
+    const ty = v => t.H - ((v - t.minY) * t.scale + t.oy);
+
+    let closest = null, bestDist = 25;
+    for (const cp of data.corner_positions) {
+        const dx = tx(cp.x) - mx, dy = ty(cp.y) - my;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < bestDist) { bestDist = d; closest = cp; }
+    }
+
+    const tip = document.getElementById('track-tooltip');
+    if (!closest) { tip.style.display = 'none'; return; }
+
+    const match = data.corners.find(c => c.corner_id === closest.corner_id);
+    const col = match ? (colors[match.cluster_id] || '#888') : '#555';
+
+    tip.style.display = 'block';
+    tip.style.left = (mx + 16) + 'px';
+    tip.style.top = (my - 10) + 'px';
+
+    if (match) {
+        tip.innerHTML = `
+            <div class="tip-header" style="border-color:${col}">
+                <strong>Turn ${match.corner_id}</strong>
+                <span class="tip-badge" style="background:${col}">${match.cluster_name}</span>
+            </div>
+            <div class="tip-row">Push Score <b>${match.pushing_score}</b></div>
+            <div class="tip-row">Mode <b>${match.driving_mode}</b></div>
+            <div class="tip-row">Avg Speed <b>${match.avg_speed} km/h</b></div>
+            <div class="tip-row">Brake Agg. <b>${match.braking_aggression}</b></div>
+        `;
+    } else {
+        tip.innerHTML = `<div class="tip-header"><strong>Turn ${closest.corner_id}</strong><span class="tip-badge" style="background:#555">Not detected</span></div>`;
+    }
+}
+
+// ── Corner cards ─────────────────────────────────────────────
+function _renderCornerCards(corners, colors, names) {
+    const container = document.getElementById('corner-cards-list');
+    if (!corners.length) {
+        container.innerHTML = '<p class="placeholder-text">No corners detected.</p>';
+        return;
+    }
+    container.innerHTML = corners.map(c => {
+        const col = colors[c.cluster_id] || '#888';
+        return `
+        <div class="corner-card" style="--card-accent:${col}">
+            <div class="corner-card-head">
+                <span class="cc-turn">T${c.corner_id}</span>
+                <span class="cc-badge" style="background:${col}">${c.cluster_name}</span>
+            </div>
+            <div class="cc-score">
+                <span class="cc-score-val">${c.pushing_score}</span>
+                <span class="cc-score-lbl">${c.driving_mode}</span>
+            </div>
+            <div class="cc-metrics">
+                <div><span>Avg Spd</span><b>${c.avg_speed} km/h</b></div>
+                <div><span>Max Spd</span><b>${c.max_speed} km/h</b></div>
+                <div><span>Brake Agg.</span><b>${c.braking_aggression}</b></div>
+                <div><span>Brake %</span><b>${c.brake_pct}%</b></div>
+                <div><span>Throttle %</span><b>${c.throttle_pct}%</b></div>
+                <div><span>Smoothness</span><b>${c.smoothness}</b></div>
+            </div>
+        </div>`;
+    }).join('');
 }

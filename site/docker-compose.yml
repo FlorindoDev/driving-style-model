@@ -1,6 +1,8 @@
 services:
   racingdna:
-    build: .
+    build:
+      context: ..
+      dockerfile: site/Dockerfile
     container_name: racingdna_app
     ports:
       - "80:5050"

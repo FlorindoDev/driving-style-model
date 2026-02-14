@@ -24,10 +24,12 @@
             <div class="logo">
                 <span class="tempo-text">Racing</span> <span class="f1-logo">DNA</span>
             </div>
-            <nav class="main-nav">
-                <a href="#" class="active">Telemetry</a>
-                <a href="#">Analysis</a>
-                <a href="#">About</a>
+            <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation">
+                <span></span><span></span><span></span>
+            </button>
+            <nav class="main-nav" id="main-nav">
+                <a href="#" class="active" data-page="telemetry">Telemetry</a>
+                <a href="#" data-page="analysis">Analysis</a>
             </nav>
         </header>
 
@@ -151,6 +153,60 @@
                     </div>
                     <div class="chart-canvas-container">
                         <canvas id="gearChart"></canvas>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ═══════ Analysis Section (hidden by default) ═══════ -->
+            <section class="analysis-section" id="analysis-section" style="display: none;">
+                <!-- Analysis Controls -->
+                <div class="analysis-controls-bar">
+                    <div class="control-group">
+                        <label for="analysis-driver">Driver</label>
+                        <select id="analysis-driver"></select>
+                    </div>
+                    <div class="control-group">
+                        <label for="analysis-lap">Lap</label>
+                        <select id="analysis-lap">
+                            <option value="fastest">Fastest Lap</option>
+                        </select>
+                    </div>
+                    <button id="analyze-btn" class="primary-btn">
+                        <span class="btn-text">Analyze Corners</span>
+                        <span class="btn-loader" style="display:none;"></span>
+                    </button>
+                </div>
+
+                <!-- Loading -->
+                <div class="loading-overlay" id="analysis-loading" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Running VAE corner analysis…</p>
+                </div>
+
+                <!-- Cluster Summary Bar -->
+                <div class="cluster-summary-bar" id="cluster-summary-bar" style="display:none;"></div>
+
+                <!-- Grid: Track Map + Corner Cards -->
+                <div class="analysis-grid">
+                    <div class="track-map-wrapper">
+                        <div class="chart-header">
+                            <h2>Track Map</h2>
+                            <div class="cluster-legend" id="cluster-legend"></div>
+                        </div>
+                        <div class="track-canvas-box">
+                            <canvas id="trackCanvas"></canvas>
+                            <div class="track-tooltip" id="track-tooltip"></div>
+                        </div>
+                    </div>
+                    <div class="corner-cards-wrapper">
+                        <div class="chart-header">
+                            <h2>Corner Analysis</h2>
+                        </div>
+                        <div class="corner-cards-list" id="corner-cards-list">
+                            <p class="placeholder-text">Select a driver and lap, then click
+                                <strong>Analyze Corners</strong>.
+                            </p>
+                        </div>
                     </div>
                 </div>
             </section>

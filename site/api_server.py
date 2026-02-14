@@ -5,6 +5,7 @@ import traceback
 import fastf1
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from api_analysis import analysis_bp
 
 # ── FastF1 cache setup ──────────────────────────────────────────
 CACHE_DIR = os.path.join(os.path.dirname(__file__), '..', 'fastf1_cache')
@@ -16,6 +17,7 @@ fastf1.Cache.enable_cache(CACHE_DIR)
 # This ensures Gunicorn serves style.css and script.js correctly from the same folder.
 app = Flask(__name__, static_url_path='', static_folder='.')
 CORS(app)  # allow cross-origin from file:// or any dev server
+app.register_blueprint(analysis_bp)
 
 # In-memory cache for loaded sessions to avoid re-downloading
 _session_cache = {}
