@@ -8,6 +8,7 @@ services:
       - "80:5050"
     volumes:
       - fastf1_cache:/fastf1_cache
+      - ../data:/app/data
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
