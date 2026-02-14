@@ -4,11 +4,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>F1 Tempo | Telemetry Analysis</title>
-    <meta name="description" content="Explore and compare Formula 1 lap times and telemetry using F1 Tempo!">
+    <title>RacingDNA | Telemetry Analysis</title>
+    <meta name="description" content="Explore and compare Formula 1 lap times and telemetry using RacingDNA!">
     <link rel="stylesheet" href="style.css">
     <!-- Chart.js via CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Zoom Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1"></script>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600;700&display=swap"
         rel="stylesheet">
@@ -65,6 +68,9 @@
                 <span class="btn-text">Load Session</span>
                 <span class="btn-loader" style="display:none;"></span>
             </button>
+            <button id="reset-zoom-btn" class="primary-btn icon-btn"
+                title="Reset Zoom (double-click chart also works)">⟲
+                Reset Zoom</button>
             <div class="session-info" id="session-info"></div>
         </section>
 
@@ -105,9 +111,10 @@
                         <!-- Populated by JS -->
                     </select>
                     <span class="selected-lap-info" id="selected-lap-info"></span>
+
                 </div>
 
-                <!-- Speed Chart -->
+                <!-- Speed Chart (full width, tall) -->
                 <div class="chart-wrapper telemetry-chart-wrapper">
                     <div class="chart-header">
                         <h2>Speed (km/h)</h2>
@@ -117,31 +124,33 @@
                     </div>
                 </div>
 
-                <!-- Throttle / Brake / Gear Row -->
-                <div class="chart-split">
-                    <div class="chart-wrapper">
-                        <div class="chart-header">
-                            <h2>Throttle</h2>
-                        </div>
-                        <div class="chart-canvas-container">
-                            <canvas id="throttleChart"></canvas>
-                        </div>
+                <!-- Throttle Chart (full width) -->
+                <div class="chart-wrapper telemetry-chart-wrapper">
+                    <div class="chart-header">
+                        <h2>Throttle (%)</h2>
                     </div>
-                    <div class="chart-wrapper">
-                        <div class="chart-header">
-                            <h2>Brake</h2>
-                        </div>
-                        <div class="chart-canvas-container">
-                            <canvas id="brakeChart"></canvas>
-                        </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="throttleChart"></canvas>
                     </div>
-                    <div class="chart-wrapper">
-                        <div class="chart-header">
-                            <h2>Gear</h2>
-                        </div>
-                        <div class="chart-canvas-container">
-                            <canvas id="gearChart"></canvas>
-                        </div>
+                </div>
+
+                <!-- Brake Chart (full width) -->
+                <div class="chart-wrapper telemetry-chart-wrapper">
+                    <div class="chart-header">
+                        <h2>Brake (%)</h2>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="brakeChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Gear Chart (full width) -->
+                <div class="chart-wrapper telemetry-chart-wrapper">
+                    <div class="chart-header">
+                        <h2>Gear</h2>
+                    </div>
+                    <div class="chart-canvas-container">
+                        <canvas id="gearChart"></canvas>
                     </div>
                 </div>
             </section>

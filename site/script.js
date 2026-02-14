@@ -9,7 +9,6 @@
 
 const API_BASE = 'http://localhost:5050';
 
-// Fallback driver data if API is down
 const FALLBACK_DRIVERS = [
     { code: 'VER', name: 'Max Verstappen', team: 'Red Bull Racing', color: '#3671C6' },
     { code: 'NOR', name: 'Lando Norris', team: 'McLaren', color: '#FF8000' },
@@ -26,23 +25,23 @@ const state = {
     selectedDrivers: ['VER', 'NOR'],
     selectedLap: 'fastest',
     dataSource: 'api',
-
-    // Cached data per session
     cache: {
         key: null,
-        lapData: {},      // { driverCode: [...] }
-        telemData: {},    // { driverCode: [...] }  – per-lap telemetry
-        drivers: null,    // array of { code, name, team, color }
+        lapData: {},
+        telemData: {},
+        drivers: null,
     }
 };
 
 // ============================================================
-//  CHART INSTANCES & SHARED STATE
+//  CHART INSTANCES & CROSSHAIR STATE
 // ============================================================
 
 let lapChart, speedChart, throttleChart, brakeChart, gearChart;
-window.telemetryHoverIndex = null; // Shared index for crosshair synchronization
-let isSyncing = false; // Prevent recursive update loops
+
+// Crosshair state – stores the raw mouse X pixel relative to chart area
+let crosshairPixelX = null;  // pixel position on source chart
+let crosshairDataX = null;   // data value (distance) for syncing across charts
 
 // ============================================================
 //  INITIALIZATION
@@ -51,7 +50,6 @@ let isSyncing = false; // Prevent recursive update loops
 document.addEventListener('DOMContentLoaded', () => {
     initCharts();
     setupEventListeners();
-    // Load GP schedule for the default year, then auto-load the first session
     loadSchedule().then(() => loadSession());
 });
 
@@ -160,6 +158,13 @@ function setupEventListeners() {
         loadTelemetryForSelectedLap().then(() => {
             updateTelemetryCharts();
             updateLapInfo();
+        });
+    });
+
+    // Reset zoom button
+    document.getElementById('reset-zoom-btn').addEventListener('click', () => {
+        [lapChart, speedChart, throttleChart, brakeChart, gearChart].forEach(c => {
+            if (c) c.resetZoom();
         });
     });
 }
@@ -383,45 +388,69 @@ function initCharts() {
     Chart.defaults.font.family = "'Titillium Web', sans-serif";
     Chart.defaults.font.size = 11;
 
-    // --- Vertical Crosshair Plugin ---
+    // -------------------------------------------------------
+    //  Vertical Crosshair Plugin
+    //  Draws at the stored crosshairDataX value (data space).
+    //  Does NOT trigger any chart.update() – purely visual overlay.
+    // -------------------------------------------------------
     const verticalLinePlugin = {
         id: 'verticalLine',
-        defaults: {
-            color: '#e8e8f0', // Bright text color
-            width: 1,
-            dash: [6, 6]
-        },
         afterDraw: (chart) => {
-            if (chart.config.type === 'scatter') return; // Skip Lap Chart
-            if (window.telemetryHoverIndex === null) return;
+            if (chart.config.type === 'scatter') return;
+            if (crosshairDataX === null) return;
 
             const ctx = chart.ctx;
-            const xAxis = chart.scales.x;
             const yAxis = chart.scales.y;
+            const xAxis = chart.scales.x;
 
-            // Find the X-pixel for the global hover index
-            const meta = chart.getDatasetMeta(0);
-            if (!meta.data || !meta.data[window.telemetryHoverIndex]) return;
+            const xPixel = xAxis.getPixelForValue(crosshairDataX);
+            if (xPixel < xAxis.left || xPixel > xAxis.right) return;
 
-            const point = meta.data[window.telemetryHoverIndex];
-            const x = point.x;
-
-            // Draw Line
+            // Gradient line
             ctx.save();
+            const grad = ctx.createLinearGradient(0, yAxis.top, 0, yAxis.bottom);
+            grad.addColorStop(0, 'rgba(225, 6, 0, 0.7)');
+            grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+            grad.addColorStop(1, 'rgba(225, 6, 0, 0.7)');
+
             ctx.beginPath();
-            ctx.moveTo(x, yAxis.top);
-            ctx.lineTo(x, yAxis.bottom);
+            ctx.moveTo(xPixel, yAxis.top);
+            ctx.lineTo(xPixel, yAxis.bottom);
             ctx.lineWidth = 1.5;
-            ctx.strokeStyle = '#ffffff';
-            ctx.setLineDash([5, 5]);
+            ctx.strokeStyle = grad;
             ctx.stroke();
+
+            // Dots at intersection with each dataset
+            chart.data.datasets.forEach((ds, dsIdx) => {
+                const meta = chart.getDatasetMeta(dsIdx);
+                if (meta.hidden) return;
+                const elements = meta.data;
+                let closest = null;
+                let minDist = Infinity;
+                for (let i = 0; i < elements.length; i++) {
+                    const d = Math.abs(elements[i].x - xPixel);
+                    if (d < minDist) { minDist = d; closest = elements[i]; }
+                }
+                if (closest && minDist < 20) {
+                    ctx.beginPath();
+                    ctx.arc(closest.x, closest.y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = ds.borderColor;
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+            });
+
             ctx.restore();
         }
     };
 
-    // Register the plugin globally
     Chart.register(verticalLinePlugin);
 
+    // -------------------------------------------------------
+    //  Tooltip style
+    // -------------------------------------------------------
     const tooltipStyle = {
         backgroundColor: 'rgba(15, 15, 30, 0.95)',
         titleColor: '#fff',
@@ -446,6 +475,34 @@ function initCharts() {
         }
     };
 
+    // -------------------------------------------------------
+    //  Zoom plugin (drag only, NO wheel, double-click to reset)
+    // -------------------------------------------------------
+    const zoomOptions = {
+        zoom: {
+            wheel: { enabled: false },  // DISABLED – user request
+            pinch: { enabled: true },
+            drag: {
+                enabled: true,
+                backgroundColor: 'rgba(225, 6, 0, 0.1)',
+                borderColor: 'rgba(225, 6, 0, 0.4)',
+                borderWidth: 1,
+            },
+            mode: 'x',
+            onZoomComplete: () => { } // noop
+        },
+        pan: {
+            enabled: true,
+            mode: 'x',
+            modifierKey: 'ctrl'
+        }
+    };
+
+    // -------------------------------------------------------
+    //  Common options for telemetry line charts
+    //  NOTE: NO onHover callback – crosshair is handled via
+    //  raw mousemove events attached directly to canvas elements.
+    // -------------------------------------------------------
     const commonLineOptions = {
         responsive: true,
         maintainAspectRatio: false,
@@ -454,76 +511,21 @@ function initCharts() {
             legend: { display: false },
             tooltip: {
                 ...tooltipStyle,
-                // Ensure tooltips are external or handle manually if needed, 
-                // but standard ones work fine if triggered programmatically.
-            }
+                enabled: false // We use external tooltip via sync
+            },
+            zoom: zoomOptions
         },
         scales: {
             x: { type: 'linear', display: false },
             y: { grid: { color: '#1f1f35', lineWidth: 0.5 } }
         },
         elements: { point: { radius: 0, hitRadius: 10 }, line: { borderWidth: 2 } },
-        animation: { duration: 0 }, // Disable animation for responsiveness
-
-        // --- SYNCHRONIZED HOVER EVENT ---
-        onHover: (event, elements, chart) => {
-            // Find nearest point index on X axis
-            const points = chart.getElementsAtEventForMode(event, 'index', { intersect: false }, true);
-
-            if (points.length > 0) {
-                const idx = points[0].index;
-                if (window.telemetryHoverIndex !== idx) {
-                    window.telemetryHoverIndex = idx;
-                    syncTelemetryCharts(idx);
-                }
-            } else {
-                // If mouse out of chart area (or no points found), clear line
-                if (window.telemetryHoverIndex !== null) {
-                    window.telemetryHoverIndex = null;
-                    syncTelemetryCharts(null);
-                }
-            }
-        }
+        animation: { duration: 0 },
     };
 
-    // Helper to trigger tooltips and crosshair on all charts
-    function syncTelemetryCharts(index) {
-        if (isSyncing) return;
-        isSyncing = true;
-
-        const charts = [speedChart, throttleChart, brakeChart, gearChart];
-
-        charts.forEach(c => {
-            if (!c) return;
-
-            if (index !== null) {
-                // Active elements for tooltip
-                // We activate index 0 of dataset 0 (assuming all synced) for that x-index
-                // Actually need to activate all visible datasets at that index 
-                // but usually just highlighting one set is enough or 'index' mode handles multiple datasets
-
-                // Chart.js 3+ way to highlight
-                // We need to construct active elements array
-                const activeElements = [];
-                c.data.datasets.forEach((ds, dsIdx) => {
-                    const meta = c.getDatasetMeta(dsIdx);
-                    if (!meta.hidden && meta.data[index]) {
-                        activeElements.push({ datasetIndex: dsIdx, index: index });
-                    }
-                });
-
-                c.tooltip.setActiveElements(activeElements, { x: 0, y: 0 }); // coords ignored in index mode usually
-                c.update();
-            } else {
-                c.tooltip.setActiveElements([], { x: 0, y: 0 });
-                c.update();
-            }
-        });
-
-        isSyncing = false;
-    }
-
-    // 1. Lap Analysis Chart (Scatter)
+    // -------------------------------------------------------
+    //  1. Lap Analysis Chart (Scatter)
+    // -------------------------------------------------------
     const ctxLap = document.getElementById('lapChart').getContext('2d');
     lapChart = new Chart(ctxLap, {
         type: 'scatter',
@@ -532,10 +534,7 @@ function initCharts() {
             responsive: true,
             maintainAspectRatio: false,
             animation: { duration: 400 },
-            interaction: {
-                mode: 'index',      // Group by X-axis (Lap number)
-                intersect: false    // Hover anywhere on vertical line
-            },
+            interaction: { mode: 'index', intersect: false },
             scales: {
                 x: {
                     type: 'linear', position: 'bottom',
@@ -561,7 +560,8 @@ function initCharts() {
                             return ` ${p.driver}: ${timeStr}${tire}${pit}`;
                         }
                     }
-                }
+                },
+                zoom: zoomOptions
             },
             onClick: (e, elements) => {
                 if (elements.length > 0) {
@@ -583,7 +583,9 @@ function initCharts() {
         }
     });
 
-    // 2. Speed Chart
+    // -------------------------------------------------------
+    //  2. Speed Chart
+    // -------------------------------------------------------
     speedChart = new Chart(document.getElementById('speedChart').getContext('2d'), {
         type: 'line', data: { datasets: [] },
         options: {
@@ -609,42 +611,212 @@ function initCharts() {
         }
     });
 
-    // 3. Throttle Chart
+    // -------------------------------------------------------
+    //  3. Throttle Chart
+    // -------------------------------------------------------
     throttleChart = new Chart(document.getElementById('throttleChart').getContext('2d'), {
         type: 'line', data: { datasets: [] },
         options: {
             ...commonLineOptions,
+            plugins: {
+                ...commonLineOptions.plugins,
+                tooltip: {
+                    ...tooltipStyle,
+                    callbacks: {
+                        ...tooltipStyle.callbacks,
+                        label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`
+                    }
+                }
+            },
             scales: {
-                ...commonLineOptions.scales,
+                x: {
+                    type: 'linear', display: true,
+                    title: { display: true, text: 'Distance (m)', color: '#50506a', font: { size: 10 } },
+                    grid: { color: '#1f1f35', lineWidth: 0.5 }
+                },
                 y: { ...commonLineOptions.scales.y, min: 0, max: 105 }
             }
         }
     });
 
-    // 4. Brake Chart
+    // -------------------------------------------------------
+    //  4. Brake Chart
+    // -------------------------------------------------------
     brakeChart = new Chart(document.getElementById('brakeChart').getContext('2d'), {
         type: 'line', data: { datasets: [] },
         options: {
             ...commonLineOptions,
+            plugins: {
+                ...commonLineOptions.plugins,
+                tooltip: {
+                    ...tooltipStyle,
+                    callbacks: {
+                        ...tooltipStyle.callbacks,
+                        label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y}%`
+                    }
+                }
+            },
             scales: {
-                ...commonLineOptions.scales,
+                x: {
+                    type: 'linear', display: true,
+                    title: { display: true, text: 'Distance (m)', color: '#50506a', font: { size: 10 } },
+                    grid: { color: '#1f1f35', lineWidth: 0.5 }
+                },
                 y: { ...commonLineOptions.scales.y, min: 0, max: 105 }
             }
         }
     });
 
-    // 5. Gear Chart
+    // -------------------------------------------------------
+    //  5. Gear Chart
+    // -------------------------------------------------------
     gearChart = new Chart(document.getElementById('gearChart').getContext('2d'), {
         type: 'line', data: { datasets: [] },
         options: {
             ...commonLineOptions,
+            plugins: {
+                ...commonLineOptions.plugins,
+                tooltip: {
+                    ...tooltipStyle,
+                    callbacks: {
+                        ...tooltipStyle.callbacks,
+                        label: (ctx) => ` ${ctx.dataset.label}: Gear ${ctx.parsed.y}`
+                    }
+                }
+            },
             scales: {
-                ...commonLineOptions.scales,
+                x: {
+                    type: 'linear', display: true,
+                    title: { display: true, text: 'Distance (m)', color: '#50506a', font: { size: 10 } },
+                    grid: { color: '#1f1f35', lineWidth: 0.5 }
+                },
                 y: { ...commonLineOptions.scales.y, min: 0, max: 9, ticks: { stepSize: 1 } }
             },
             elements: { ...commonLineOptions.elements, line: { borderWidth: 2, stepped: 'before' } }
         }
     });
+
+    // -------------------------------------------------------
+    //  RAW MOUSEMOVE CROSSHAIR (No Chart.js hover system)
+    //  This is the key fix for flickering. We attach native
+    //  mousemove/mouseleave events to each telemetry canvas
+    //  and manually draw + trigger tooltips using requestAnimationFrame.
+    // -------------------------------------------------------
+    setupCrosshairSync();
+}
+
+/**
+ * Attach raw mousemove/mouseleave events to each telemetry chart canvas.
+ * On move: convert mouse pixel X → data X value → store in crosshairDataX
+ *          then requestAnimationFrame to redraw all charts & sync tooltips.
+ */
+function setupCrosshairSync() {
+    const telemetryCharts = () => [speedChart, throttleChart, brakeChart, gearChart];
+    const canvasIds = ['speedChart', 'throttleChart', 'brakeChart', 'gearChart'];
+
+    let rafId = null;
+
+    canvasIds.forEach(canvasId => {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+
+        canvas.addEventListener('mousemove', (evt) => {
+            // Find which chart this canvas belongs to
+            const chart = telemetryCharts().find(c => c && c.canvas === canvas);
+            if (!chart || !chart.scales || !chart.scales.x) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = evt.clientX - rect.left;
+
+            // Convert pixel to data value
+            const xAxis = chart.scales.x;
+            const dataX = xAxis.getValueForPixel(mouseX);
+
+            // Only update if value actually changed meaningfully (reduce redraws)
+            if (crosshairDataX !== null && Math.abs(crosshairDataX - dataX) < 0.5) return;
+
+            crosshairDataX = dataX;
+
+            // Cancel any pending frame and schedule a new one
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                syncAllTelemetryCharts(chart);
+                rafId = null;
+            });
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            crosshairDataX = null;
+            if (rafId) cancelAnimationFrame(rafId);
+            rafId = requestAnimationFrame(() => {
+                clearAllTelemetryCrosshairs();
+                rafId = null;
+            });
+        });
+    });
+}
+
+/**
+ * Sync crosshair + tooltips on all telemetry charts.
+ * We find the nearest data index for the current crosshairDataX,
+ * then activate tooltips on all charts at that index.
+ */
+function syncAllTelemetryCharts(sourceChart) {
+    const charts = [speedChart, throttleChart, brakeChart, gearChart];
+
+    charts.forEach(chart => {
+        if (!chart || chart.data.datasets.length === 0) return;
+
+        const ds = chart.data.datasets[0];
+        if (!ds || !ds.data || ds.data.length === 0) return;
+
+        // Binary search for nearest index by X value
+        const idx = findNearestIndex(ds.data, crosshairDataX);
+
+        // Activate tooltip elements at this index
+        const activeElements = [];
+        chart.data.datasets.forEach((dataset, dsIdx) => {
+            const meta = chart.getDatasetMeta(dsIdx);
+            if (!meta.hidden && meta.data[idx]) {
+                activeElements.push({ datasetIndex: dsIdx, index: idx });
+            }
+        });
+
+        chart.tooltip.setActiveElements(activeElements, { x: 0, y: 0 });
+        chart.setActiveElements(activeElements);
+        chart.draw(); // Direct draw, no update() – avoids triggering events
+    });
+}
+
+/**
+ * Clear crosshair and tooltips from all telemetry charts.
+ */
+function clearAllTelemetryCrosshairs() {
+    const charts = [speedChart, throttleChart, brakeChart, gearChart];
+    charts.forEach(chart => {
+        if (!chart) return;
+        chart.tooltip.setActiveElements([], { x: 0, y: 0 });
+        chart.setActiveElements([]);
+        chart.draw();
+    });
+}
+
+/**
+ * Binary search to find the data point index nearest to targetX.
+ */
+function findNearestIndex(data, targetX) {
+    if (!data || data.length === 0) return 0;
+    let lo = 0, hi = data.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (data[mid].x < targetX) lo = mid + 1;
+        else hi = mid;
+    }
+    // Check if lo-1 is closer
+    if (lo > 0 && Math.abs(data[lo - 1].x - targetX) < Math.abs(data[lo].x - targetX)) {
+        return lo - 1;
+    }
+    return lo;
 }
 
 // ============================================================
@@ -675,7 +847,7 @@ function updateLapChart() {
             borderColor: driver.color,
             showLine: true,
             borderWidth: 2,
-            tension: 0.35, // Smoother lines
+            tension: 0.35,
             pointRadius: 3,
             pointHoverRadius: 7,
             pointBorderWidth: 0,
@@ -708,10 +880,10 @@ function updateTelemetryCharts() {
         const commonDs = {
             label: driver.name,
             borderColor: driver.color,
-            borderWidth: 2, // Thicker line
-            tension: 0.35,  // Smooth curve
+            borderWidth: 2,
+            tension: 0.35,
             pointRadius: 0,
-            pointHoverRadius: 0, // Hide points on hover, just line
+            pointHoverRadius: 5,
             fill: false
         };
 
