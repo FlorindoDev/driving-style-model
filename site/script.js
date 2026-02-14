@@ -37,10 +37,12 @@ const state = {
 };
 
 // ============================================================
-//  CHART INSTANCES
+//  CHART INSTANCES & SHARED STATE
 // ============================================================
 
 let lapChart, speedChart, throttleChart, brakeChart, gearChart;
+window.telemetryHoverIndex = null; // Shared index for crosshair synchronization
+let isSyncing = false; // Prevent recursive update loops
 
 // ============================================================
 //  INITIALIZATION
@@ -87,7 +89,6 @@ async function loadDriversFromAPI(year, gp, session) {
         const drivers = await resp.json();
 
         if (drivers && drivers.length > 0) {
-            // Differentiate same-team colors
             differentiateTeamColors(drivers);
             state.cache.drivers = drivers;
         } else {
@@ -136,30 +137,24 @@ function toggleDriver(driverCode) {
         }
     }
 
-    // Update sidebar UI
     document.querySelectorAll('.driver-item').forEach(el => {
         el.classList.toggle('selected', state.selectedDrivers.includes(el.dataset.driver));
     });
 
-    // Update legend
     updateLegend();
 
-    // Update charts (load data for any new driver that may not be cached)
     loadSelectedDriversData().then(() => {
         updateAllCharts();
     });
 }
 
 function setupEventListeners() {
-    // Load Session button
     document.getElementById('load-data-btn').addEventListener('click', () => loadSession());
 
-    // Year change → refresh schedule
     document.getElementById('year-select').addEventListener('change', () => {
         loadSchedule();
     });
 
-    // Lap selector change → reload telemetry for selected lap
     document.getElementById('lap-select').addEventListener('change', (e) => {
         state.selectedLap = e.target.value;
         loadTelemetryForSelectedLap().then(() => {
@@ -180,37 +175,29 @@ async function loadSession() {
     const cacheKey = `${year}-${race}-${session}`;
 
     if (!race) return;
-
-    // If same session, don't reload
     if (state.cache.key === cacheKey) return;
 
     showLoading(true);
     setBtnLoading(true);
 
-    // Reset cache
     state.cache.key = cacheKey;
     state.cache.lapData = {};
     state.cache.telemData = {};
     state.selectedLap = 'fastest';
 
     try {
-        // 1. Load drivers
         await loadDriversFromAPI(year, race, session);
 
-        // 2. Ensure selected drivers exist in the new list
         const driverCodes = (state.cache.drivers || []).map(d => d.code);
         state.selectedDrivers = state.selectedDrivers.filter(c => driverCodes.includes(c));
         if (state.selectedDrivers.length === 0 && driverCodes.length > 0) {
             state.selectedDrivers = driverCodes.slice(0, 2);
         }
-        // Refresh driver list selection UI
         document.querySelectorAll('.driver-item').forEach(el => {
             el.classList.toggle('selected', state.selectedDrivers.includes(el.dataset.driver));
         });
 
-        // 3. Load lap data + telemetry for selected drivers
         await loadSelectedDriversData();
-
         state.dataSource = 'api';
     } catch (err) {
         console.error('Session load failed:', err);
@@ -218,7 +205,6 @@ async function loadSession() {
         loadMockData();
     }
 
-    // Populate lap selector
     populateLapSelector();
     updateLegend();
     updateAllCharts();
@@ -234,11 +220,9 @@ async function loadSelectedDriversData() {
     const session = document.getElementById('session-select').value;
 
     const promises = state.selectedDrivers.map(async (code) => {
-        // Load laps if not cached
         if (!state.cache.lapData[code]) {
             await loadDriverLaps(year, race, session, code);
         }
-        // Load telemetry if not cached
         if (!state.cache.telemData[code]) {
             await loadDriverTelemetry(year, race, session, code, state.selectedLap);
         }
@@ -287,7 +271,7 @@ async function loadDriverTelemetry(year, race, session, driverCode, lap) {
                 x: t.distance,
                 speed: t.speed,
                 throttle: t.throttle,
-                brake: t.brake * 100,  // convert 0/1 to 0/100 for chart
+                brake: t.brake * 100,
                 gear: t.gear,
                 rpm: t.rpm,
             }));
@@ -305,7 +289,6 @@ async function loadTelemetryForSelectedLap() {
     const race = document.getElementById('race-select').value;
     const session = document.getElementById('session-select').value;
 
-    // Clear telemetry cache and reload for new lap
     state.cache.telemData = {};
 
     const promises = state.selectedDrivers.map(code =>
@@ -400,6 +383,45 @@ function initCharts() {
     Chart.defaults.font.family = "'Titillium Web', sans-serif";
     Chart.defaults.font.size = 11;
 
+    // --- Vertical Crosshair Plugin ---
+    const verticalLinePlugin = {
+        id: 'verticalLine',
+        defaults: {
+            color: '#e8e8f0', // Bright text color
+            width: 1,
+            dash: [6, 6]
+        },
+        afterDraw: (chart) => {
+            if (chart.config.type === 'scatter') return; // Skip Lap Chart
+            if (window.telemetryHoverIndex === null) return;
+
+            const ctx = chart.ctx;
+            const xAxis = chart.scales.x;
+            const yAxis = chart.scales.y;
+
+            // Find the X-pixel for the global hover index
+            const meta = chart.getDatasetMeta(0);
+            if (!meta.data || !meta.data[window.telemetryHoverIndex]) return;
+
+            const point = meta.data[window.telemetryHoverIndex];
+            const x = point.x;
+
+            // Draw Line
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x, yAxis.top);
+            ctx.lineTo(x, yAxis.bottom);
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = '#ffffff';
+            ctx.setLineDash([5, 5]);
+            ctx.stroke();
+            ctx.restore();
+        }
+    };
+
+    // Register the plugin globally
+    Chart.register(verticalLinePlugin);
+
     const tooltipStyle = {
         backgroundColor: 'rgba(15, 15, 30, 0.95)',
         titleColor: '#fff',
@@ -430,17 +452,78 @@ function initCharts() {
         interaction: { mode: 'index', intersect: false },
         plugins: {
             legend: { display: false },
-            tooltip: { ...tooltipStyle }
+            tooltip: {
+                ...tooltipStyle,
+                // Ensure tooltips are external or handle manually if needed, 
+                // but standard ones work fine if triggered programmatically.
+            }
         },
         scales: {
             x: { type: 'linear', display: false },
             y: { grid: { color: '#1f1f35', lineWidth: 0.5 } }
         },
         elements: { point: { radius: 0, hitRadius: 10 }, line: { borderWidth: 2 } },
-        animation: { duration: 400 }
+        animation: { duration: 0 }, // Disable animation for responsiveness
+
+        // --- SYNCHRONIZED HOVER EVENT ---
+        onHover: (event, elements, chart) => {
+            // Find nearest point index on X axis
+            const points = chart.getElementsAtEventForMode(event, 'index', { intersect: false }, true);
+
+            if (points.length > 0) {
+                const idx = points[0].index;
+                if (window.telemetryHoverIndex !== idx) {
+                    window.telemetryHoverIndex = idx;
+                    syncTelemetryCharts(idx);
+                }
+            } else {
+                // If mouse out of chart area (or no points found), clear line
+                if (window.telemetryHoverIndex !== null) {
+                    window.telemetryHoverIndex = null;
+                    syncTelemetryCharts(null);
+                }
+            }
+        }
     };
 
-    // 1. Lap Analysis Chart (Scatter with lines)
+    // Helper to trigger tooltips and crosshair on all charts
+    function syncTelemetryCharts(index) {
+        if (isSyncing) return;
+        isSyncing = true;
+
+        const charts = [speedChart, throttleChart, brakeChart, gearChart];
+
+        charts.forEach(c => {
+            if (!c) return;
+
+            if (index !== null) {
+                // Active elements for tooltip
+                // We activate index 0 of dataset 0 (assuming all synced) for that x-index
+                // Actually need to activate all visible datasets at that index 
+                // but usually just highlighting one set is enough or 'index' mode handles multiple datasets
+
+                // Chart.js 3+ way to highlight
+                // We need to construct active elements array
+                const activeElements = [];
+                c.data.datasets.forEach((ds, dsIdx) => {
+                    const meta = c.getDatasetMeta(dsIdx);
+                    if (!meta.hidden && meta.data[index]) {
+                        activeElements.push({ datasetIndex: dsIdx, index: index });
+                    }
+                });
+
+                c.tooltip.setActiveElements(activeElements, { x: 0, y: 0 }); // coords ignored in index mode usually
+                c.update();
+            } else {
+                c.tooltip.setActiveElements([], { x: 0, y: 0 });
+                c.update();
+            }
+        });
+
+        isSyncing = false;
+    }
+
+    // 1. Lap Analysis Chart (Scatter)
     const ctxLap = document.getElementById('lapChart').getContext('2d');
     lapChart = new Chart(ctxLap, {
         type: 'scatter',
@@ -449,6 +532,10 @@ function initCharts() {
             responsive: true,
             maintainAspectRatio: false,
             animation: { duration: 400 },
+            interaction: {
+                mode: 'index',      // Group by X-axis (Lap number)
+                intersect: false    // Hover anywhere on vertical line
+            },
             scales: {
                 x: {
                     type: 'linear', position: 'bottom',
@@ -472,12 +559,7 @@ function initCharts() {
                             const tire = p.tire ? ` · ${p.tire}` : '';
                             const pit = p.isPit ? ' ⟳ PIT' : '';
                             return ` ${p.driver}: ${timeStr}${tire}${pit}`;
-                        },
-                        labelColor: (ctx) => ({
-                            borderColor: ctx.dataset.borderColor,
-                            backgroundColor: ctx.dataset.borderColor,
-                            borderRadius: 2
-                        })
+                        }
                     }
                 }
             },
@@ -591,11 +673,9 @@ function updateLapChart() {
             data: lapData,
             backgroundColor: driver.color,
             borderColor: driver.color,
-            // --- LINE CONNECTING POINTS ---
             showLine: true,
             borderWidth: 2,
-            tension: 0.3,
-            // --- POINT STYLE ---
+            tension: 0.35, // Smoother lines
             pointRadius: 3,
             pointHoverRadius: 7,
             pointBorderWidth: 0,
@@ -628,9 +708,10 @@ function updateTelemetryCharts() {
         const commonDs = {
             label: driver.name,
             borderColor: driver.color,
-            borderWidth: 1.5,
-            tension: 0.2,
+            borderWidth: 2, // Thicker line
+            tension: 0.35,  // Smooth curve
             pointRadius: 0,
+            pointHoverRadius: 0, // Hide points on hover, just line
             fill: false
         };
 
@@ -640,7 +721,8 @@ function updateTelemetryCharts() {
         datasetsGear.push({
             ...commonDs,
             data: telemData.map(d => ({ x: d.x, y: d.gear })),
-            stepped: 'before'
+            stepped: 'before',
+            tension: 0
         });
     });
 

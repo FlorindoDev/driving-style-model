@@ -442,13 +442,13 @@ select:hover {
 }
 
 .lap-chart-wrapper {
-    min-height: 220px;
-    max-height: 280px;
+    min-height: 500px;
+    max-height: 600px;
 }
 
 .telemetry-chart-wrapper {
-    min-height: 180px;
-    max-height: 250px;
+    min-height: 450px;
+    max-height: 600px;
 }
 
 .chart-header {
