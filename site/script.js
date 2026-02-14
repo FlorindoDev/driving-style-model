@@ -196,6 +196,11 @@ async function loadSession() {
     state.cache.telemData = {};
     state.selectedLap = 'fastest';
 
+    state.cache.drivers = null;
+    window._loadedDrivers = [];
+    window._loadedLapsByDriver = {};
+    _clearAnalysis();
+
     try {
         await loadDriversFromAPI(year, race, session);
 
@@ -225,6 +230,25 @@ async function loadSession() {
     setBtnLoading(false);
 }
 
+function _clearAnalysis() {
+    _analysisData = null;
+    _trackTransform = null;
+    const canvas = document.getElementById('trackCanvas');
+    if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    const cards = document.getElementById('corner-cards-list');
+    if (cards) cards.innerHTML = '<p class="placeholder-text">Select a driver and lap, then click <strong>Analyze Corners</strong>.</p>';
+    const summary = document.getElementById('cluster-summary-bar');
+    if (summary) summary.style.display = 'none';
+    const legend = document.getElementById('cluster-legend');
+    if (legend) legend.innerHTML = '';
+
+    // Reset dropdowns
+    _populateAnalysisDrivers();
+}
+
 async function loadSelectedDriversData() {
     const year = document.getElementById('year-select').value;
     const race = document.getElementById('race-select').value;
@@ -249,9 +273,9 @@ async function loadDriverLaps(year, race, session, driverCode) {
         if (!resp.ok) throw new Error(`Laps API failed for ${driverCode}`);
         const laps = await resp.json();
 
-        // Store full lap list for Analysis section
+        // Store full lap list for Analysis section (with metadata)
         if (!window._loadedLapsByDriver) window._loadedLapsByDriver = {};
-        window._loadedLapsByDriver[driverCode] = laps;
+        window._loadedLapsByDriver[driverCode] = { session: session, laps: laps };
         _populateAnalysisLaps();
 
         if (laps && laps.length > 0) {
@@ -266,11 +290,21 @@ async function loadDriverLaps(year, race, session, driverCode) {
                 sector3: l.sector3,
             }));
         } else {
-            state.cache.lapData[driverCode] = generateLapData(driverCode);
+            const mock = generateLapData(driverCode, session);
+            state.cache.lapData[driverCode] = mock;
+            // Also populate _loadedLapsByDriver for Analysis
+            if (!window._loadedLapsByDriver) window._loadedLapsByDriver = {};
+            window._loadedLapsByDriver[driverCode] = { session: session, laps: mock.map(m => ({ lap: m.x, time: m.y })) };
+            _populateAnalysisLaps();
         }
     } catch (err) {
         console.warn(`Lap data failed for ${driverCode}:`, err);
-        state.cache.lapData[driverCode] = generateLapData(driverCode);
+        const mock = generateLapData(driverCode, session);
+        state.cache.lapData[driverCode] = mock;
+        // Also populate _loadedLapsByDriver for Analysis
+        if (!window._loadedLapsByDriver) window._loadedLapsByDriver = {};
+        window._loadedLapsByDriver[driverCode] = { session: session, laps: mock.map(m => ({ lap: m.x, time: m.y })) };
+        _populateAnalysisLaps();
     }
 }
 
@@ -322,15 +356,34 @@ function loadMockData() {
     state.cache.lapData = {};
     state.cache.telemData = {};
 
+    // Also clear/init _loadedLapsByDriver for Analysis
+    window._loadedLapsByDriver = {};
+
     FALLBACK_DRIVERS.forEach(d => {
-        state.cache.lapData[d.code] = generateLapData(d.code);
+        // Mocking 'Race' for fallback
+        const mockLaps = generateLapData(d.code, 'Race');
+        state.cache.lapData[d.code] = mockLaps;
         state.cache.telemData[d.code] = generateTelemetry(d.code);
+
+        // Populate _loadedLapsByDriver so Analysis dropdown works
+        window._loadedLapsByDriver[d.code] = { session: 'Race', laps: mockLaps.map(m => ({ lap: m.x, time: m.y })) };
     });
 
     populateDriverList();
+    _populateAnalysisDrivers(); // Ensure Analysis dropdowns are updated
 }
 
-function generateLapData(driverCode, laps = 55) {
+function generateLapData(driverCode, sessionType = 'Race') {
+    const s = sessionType.toLowerCase();
+    const isQuali = s.includes('qual') || s.includes('sprint qualifying');
+    const isPractice = s.includes('practice');
+    const isSprint = s.includes('sprint') && !isQuali;
+
+    let laps = 55; // Default Race
+    if (isQuali) laps = 15;
+    else if (isSprint) laps = 17;
+    else if (isPractice) laps = 25;
+
     const data = [];
     const driverIdx = (state.cache.drivers || FALLBACK_DRIVERS).findIndex(d => d.code === driverCode);
     let baseTime = 88 + (driverIdx >= 0 ? driverIdx * 0.08 : Math.random());
@@ -339,13 +392,28 @@ function generateLapData(driverCode, laps = 55) {
 
     for (let i = 1; i <= laps; i++) {
         tireAge++;
-        if (tireAge > 14 + Math.floor(Math.random() * 6)) {
-            currentTire = currentTire === 'SOFT' ? 'MEDIUM' : 'HARD';
-            tireAge = 0;
-            data.push({ x: i, y: baseTime + 18 + Math.random() * 4, tire: currentTire, driver: driverCode, isPit: true });
-            continue;
+
+        // Pit logic: frequent in practice, occasional in race
+        const pitChance = isPractice ? 0.15 : (isSprint ? 0.0 : 0.05);
+
+        if (!isQuali && !isSprint && tireAge > 8 + Math.floor(Math.random() * 8)) {
+            // Change tires / pit
+            if (Math.random() < pitChance) {
+                currentTire = currentTire === 'SOFT' ? 'MEDIUM' : 'HARD';
+                tireAge = 0;
+                data.push({ x: i, y: baseTime + 18 + Math.random() * 4, tire: currentTire, driver: driverCode, isPit: true });
+                continue;
+            }
         }
+
+        // Lap time generation
         let time = baseTime + (tireAge * 0.08) + (Math.random() * 0.6 - 0.3);
+
+        // Quali laps are faster/more erratic (in/out laps)
+        if (isQuali && i % 4 === 0) time += 20; // Slow lap
+        // Practice includes slow laps too
+        if (isPractice && Math.random() < 0.2) time += 15;
+
         if (currentTire === 'SOFT') time -= 0.3;
         if (currentTire === 'HARD') time += 0.2;
         data.push({ x: i, y: time, tire: currentTire, driver: driverCode });
@@ -1106,18 +1174,68 @@ function _populateAnalysisDrivers() {
     _populateAnalysisLaps();
 }
 
-function _populateAnalysisLaps() {
+async function _populateAnalysisLaps() {
     const sel = document.getElementById('analysis-lap');
     if (!sel) return;
-    sel.innerHTML = '<option value="fastest">Fastest Lap</option>';
+
+    // Clear existing options except loading
+    sel.innerHTML = '';
+
     const driverCode = document.getElementById('analysis-driver')?.value;
-    if (!driverCode || !window._loadedLapsByDriver) return;
-    const laps = window._loadedLapsByDriver[driverCode];
-    if (laps) {
+    if (!driverCode) {
+        const o = document.createElement('option');
+        o.textContent = "Select Driver first"; // Changed from o.test to o.textContent
+        sel.add(o);
+        return;
+    }
+
+    // Default option
+    const defOpt = document.createElement('option');
+    defOpt.value = 'fastest';
+    defOpt.textContent = 'Fastest Lap';
+    sel.appendChild(defOpt);
+
+    const cached = window._loadedLapsByDriver ? window._loadedLapsByDriver[driverCode] : null;
+
+    // Check if we have VALID laps loaded for this driver and session
+    if (!cached || cached.session !== document.getElementById('session-select').value) {
+        // Driver laps not loaded (e.g. not a main selected driver)
+        // We need to fetch them.
+        const year = document.getElementById('year-select').value;
+        const gp = document.getElementById('race-select').value;
+        const session = document.getElementById('session-select').value;
+
+        // Show temporary loading state
+        const loadOpt = document.createElement('option');
+        loadOpt.textContent = 'Loading laps...';
+        loadOpt.disabled = true;
+        sel.appendChild(loadOpt);
+        sel.disabled = true;
+
+        try {
+            // Re-use loadDriverLaps to fetch and cache
+            // Note: This function updates window._loadedLapsByDriver
+            if (!year || !gp || !session) throw new Error("Session info missing");
+            await loadDriverLaps(year, gp, session, driverCode);
+            loadOpt.remove(); // Only remove on success
+        } catch (e) {
+            console.error(e);
+            loadOpt.textContent = 'Error: ' + e.message;
+            // Keep the error option visible
+        }
+
+        sel.disabled = false;
+    }
+
+    const entry = window._loadedLapsByDriver ? window._loadedLapsByDriver[driverCode] : null;
+    const laps = entry ? entry.laps : null;
+    if (laps && Array.isArray(laps)) {
         laps.forEach(l => {
             const o = document.createElement('option');
             o.value = l.lap;
-            o.textContent = `Lap ${l.lap}`;
+            // Format time nicely if it's a number (seconds)
+            const tStr = (typeof l.time === 'number') ? formatLapTime(l.time) : l.time;
+            o.textContent = `Lap ${l.lap} - ${tStr}`;
             sel.appendChild(o);
         });
     }
@@ -1155,7 +1273,7 @@ document.getElementById('analyze-btn')?.addEventListener('click', async () => {
         alert('Analysis failed: ' + err.message);
     } finally {
         loader.style.display = 'none';
-        txt.textContent = '🔬 Analyze Corners';
+        txt.textContent = 'Analyze Corners';
         btn.disabled = false;
         overlay.style.display = 'none';
     }
@@ -1201,26 +1319,38 @@ function _renderAnalysis(data) {
 // ── Canvas track map ─────────────────────────────────────────
 function _drawTrackMap(data, colors) {
     const canvas = document.getElementById('trackCanvas');
+    if (!canvas) return;
     const box = canvas.parentElement;
-    const dpr = window.devicePixelRatio || 1;
 
-    canvas.width = box.clientWidth * dpr;
-    canvas.height = (box.clientWidth * 0.7) * dpr;
-    canvas.style.width = box.clientWidth + 'px';
-    canvas.style.height = (box.clientWidth * 0.7) + 'px';
+    // Ensure box has width (wait if not visible yet)
+    const rect = box.getBoundingClientRect();
+    if (rect.width === 0) {
+        requestAnimationFrame(() => _drawTrackMap(data, colors));
+        return;
+    }
+
+    const dpr = window.devicePixelRatio || 1;
+    const width = rect.width;
+    const height = width * 0.40;
+
+    canvas.width = width * dpr;
+    canvas.height = (width * 0.48) * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = (width * 0.48) + 'px';
 
     const ctx = canvas.getContext('2d');
+    ctx.resetTransform(); // Clear any previous scale
     ctx.scale(dpr, dpr);
 
-    const W = box.clientWidth;
-    const H = box.clientWidth * 0.7;
+    const W = width;
+    const H = width * 0.48;
 
     const { x, y } = data.track;
     const minX = Math.min(...x), maxX = Math.max(...x);
     const minY = Math.min(...y), maxY = Math.max(...y);
     const tw = maxX - minX || 1, th = maxY - minY || 1;
 
-    const pad = 50;
+    const pad = 40;
     const scale = Math.min((W - 2 * pad) / tw, (H - 2 * pad) / th);
     const ox = (W - tw * scale) / 2;
     const oy = (H - th * scale) / 2;
@@ -1275,12 +1405,23 @@ function _drawTrackMap(data, colors) {
         ctx.fillText(cp.corner_id, px, py);
     }
 
+    // Prepare for resize redrawing
+    window._cachedAnalysisData = { data, colors };
+
     // Mouse hover for tooltip
     canvas.onmousemove = e => _trackMouseMove(e, data, colors);
     canvas.onmouseleave = () => {
         document.getElementById('track-tooltip').style.display = 'none';
     };
 }
+
+// Global resize listener for track map
+window.addEventListener('resize', () => {
+    if (window._cachedAnalysisData && document.getElementById('analysis-section').style.display !== 'none') {
+        const { data, colors } = window._cachedAnalysisData;
+        _drawTrackMap(data, colors);
+    }
+});
 
 function _trackMouseMove(e, data, colors) {
     const canvas = document.getElementById('trackCanvas');
@@ -1316,8 +1457,6 @@ function _trackMouseMove(e, data, colors) {
                 <strong>Turn ${match.corner_id}</strong>
                 <span class="tip-badge" style="background:${col}">${match.cluster_name}</span>
             </div>
-            <div class="tip-row">Push Score <b>${match.pushing_score}</b></div>
-            <div class="tip-row">Mode <b>${match.driving_mode}</b></div>
             <div class="tip-row">Avg Speed <b>${match.avg_speed} km/h</b></div>
             <div class="tip-row">Brake Agg. <b>${match.braking_aggression}</b></div>
         `;
@@ -1340,10 +1479,6 @@ function _renderCornerCards(corners, colors, names) {
             <div class="corner-card-head">
                 <span class="cc-turn">T${c.corner_id}</span>
                 <span class="cc-badge" style="background:${col}">${c.cluster_name}</span>
-            </div>
-            <div class="cc-score">
-                <span class="cc-score-val">${c.pushing_score}</span>
-                <span class="cc-score-lbl">${c.driving_mode}</span>
             </div>
             <div class="cc-metrics">
                 <div><span>Avg Spd</span><b>${c.avg_speed} km/h</b></div>
