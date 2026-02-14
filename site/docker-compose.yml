@@ -3,7 +3,7 @@ services:
     build: .
     container_name: racingdna_app
     ports:
-      - "5050:80"
+      - "80:5050"
     volumes:
       - fastf1_cache:/fastf1_cache
     environment:
