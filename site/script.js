@@ -1,64 +1,38 @@
 /**
- * F1 Tempo Clone - Script.js
- * Handles UI logic, OpenF1 API integration, data caching, and Chart.js rendering.
+ * RacingDNA – Script.js
+ * Frontend for F1 telemetry visualization, powered by FastF1 backend API.
  */
 
 // ============================================================
-//  DATA CONSTANTS
+//  CONFIG
 // ============================================================
 
-const DRIVERS_2024 = [
-    { code: 'VER', name: 'Max Verstappen', team: 'Red Bull Racing', color: '#3671C6', altColor: '#1e41ff' },
-    { code: 'PER', name: 'Sergio Perez', team: 'Red Bull Racing', color: '#5b9bd5', altColor: '#6692FF' },
-    { code: 'HAM', name: 'Lewis Hamilton', team: 'Mercedes', color: '#27F4D2', altColor: '#00d2be' },
-    { code: 'RUS', name: 'George Russell', team: 'Mercedes', color: '#6CFCE6', altColor: '#27F4D2' },
-    { code: 'LEC', name: 'Charles Leclerc', team: 'Ferrari', color: '#E80020', altColor: '#ff3333' },
-    { code: 'SAI', name: 'Carlos Sainz', team: 'Ferrari', color: '#FF6666', altColor: '#ff8888' },
-    { code: 'NOR', name: 'Lando Norris', team: 'McLaren', color: '#FF8000', altColor: '#ff9933' },
-    { code: 'PIA', name: 'Oscar Piastri', team: 'McLaren', color: '#FFB366', altColor: '#ffcc66' },
-    { code: 'ALO', name: 'Fernando Alonso', team: 'Aston Martin', color: '#229971', altColor: '#00665f' },
-    { code: 'STR', name: 'Lance Stroll', team: 'Aston Martin', color: '#44cc99', altColor: '#2DB571' },
-    { code: 'GAS', name: 'Pierre Gasly', team: 'Alpine', color: '#0093CC', altColor: '#00b8f1' },
-    { code: 'OCO', name: 'Esteban Ocon', team: 'Alpine', color: '#55C8FF', altColor: '#70cbff' },
-    { code: 'ALB', name: 'Alexander Albon', team: 'Williams', color: '#64C4FF', altColor: '#00a0dc' },
-    { code: 'SAR', name: 'Logan Sargeant', team: 'Williams', color: '#99DDFF', altColor: '#37bedd' },
-    { code: 'TSU', name: 'Yuki Tsunoda', team: 'RB', color: '#6692FF', altColor: '#4466dd' },
-    { code: 'RIC', name: 'Daniel Ricciardo', team: 'RB', color: '#99B3FF', altColor: '#7788ff' },
-    { code: 'BOT', name: 'Valtteri Bottas', team: 'Kick Sauber', color: '#52E252', altColor: '#00e000' },
-    { code: 'ZHO', name: 'Guanyu Zhou', team: 'Kick Sauber', color: '#88FF88', altColor: '#55dd55' },
-    { code: 'HUL', name: 'Nico Hulkenberg', team: 'Haas', color: '#B6BABD', altColor: '#999999' },
-    { code: 'MAG', name: 'Kevin Magnussen', team: 'Haas', color: '#DDDDDD', altColor: '#cccccc' }
-];
+const API_BASE = 'http://localhost:5050';
 
-const RACES_2024 = [
-    "Bahrain Grand Prix", "Saudi Arabian Grand Prix", "Australian Grand Prix",
-    "Japanese Grand Prix", "Chinese Grand Prix", "Miami Grand Prix",
-    "Emilia Romagna Grand Prix", "Monaco Grand Prix", "Canadian Grand Prix",
-    "Spanish Grand Prix", "Austrian Grand Prix", "British Grand Prix",
-    "Hungarian Grand Prix", "Belgian Grand Prix", "Dutch Grand Prix",
-    "Italian Grand Prix", "Azerbaijan Grand Prix", "Singapore Grand Prix",
-    "United States Grand Prix", "Mexico City Grand Prix", "São Paulo Grand Prix",
-    "Las Vegas Grand Prix", "Qatar Grand Prix", "Abu Dhabi Grand Prix"
+// Fallback driver data if API is down
+const FALLBACK_DRIVERS = [
+    { code: 'VER', name: 'Max Verstappen', team: 'Red Bull Racing', color: '#3671C6' },
+    { code: 'NOR', name: 'Lando Norris', team: 'McLaren', color: '#FF8000' },
+    { code: 'HAM', name: 'Lewis Hamilton', team: 'Mercedes', color: '#27F4D2' },
+    { code: 'LEC', name: 'Charles Leclerc', team: 'Ferrari', color: '#E80020' },
+    { code: 'SAI', name: 'Carlos Sainz', team: 'Ferrari', color: '#FF6666' },
 ];
-
-const RACES_2023 = RACES_2024; // Same calendar for simplicity
 
 // ============================================================
-//  APP STATE - with data caching
+//  APP STATE
 // ============================================================
 
 const state = {
     selectedDrivers: ['VER', 'NOR'],
     selectedLap: 'fastest',
-    sessionKey: null,
-    dataSource: 'mock', // 'api' or 'mock'
+    dataSource: 'api',
 
-    // Cached data per session – prevents regeneration on every click
+    // Cached data per session
     cache: {
-        key: null, // `${year}-${race}-${session}`
-        lapData: {},    // { driverCode: [...] }
-        telemData: {},  // { driverCode: {...} }
-        drivers: null   // array from API or fallback
+        key: null,
+        lapData: {},      // { driverCode: [...] }
+        telemData: {},    // { driverCode: [...] }  – per-lap telemetry
+        drivers: null,    // array of { code, name, team, color }
     }
 };
 
@@ -73,35 +47,65 @@ let lapChart, speedChart, throttleChart, brakeChart, gearChart;
 // ============================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    initUI();
     initCharts();
     setupEventListeners();
-    loadSession(); // Initial load with defaults
+    // Load GP schedule for the default year, then auto-load the first session
+    loadSchedule().then(() => loadSession());
 });
 
-function initUI() {
-    populateRaceSelect();
-    populateDriverList();
-}
+// ============================================================
+//  SCHEDULE & DRIVER LIST  (from FastF1 API)
+// ============================================================
 
-function populateRaceSelect() {
+async function loadSchedule() {
     const year = document.getElementById('year-select').value;
     const raceSelect = document.getElementById('race-select');
-    const races = year === '2023' ? RACES_2023 : RACES_2024;
-    raceSelect.innerHTML = '';
-    races.forEach((race, i) => {
-        const option = document.createElement('option');
-        option.value = race;
-        option.text = race;
-        raceSelect.add(option);
-    });
+
+    try {
+        const resp = await fetch(`${API_BASE}/api/schedule?year=${year}`);
+        if (!resp.ok) throw new Error('Schedule API failed');
+        const events = await resp.json();
+
+        raceSelect.innerHTML = '';
+        events.forEach(ev => {
+            const opt = document.createElement('option');
+            opt.value = ev.name;
+            opt.text = ev.name;
+            raceSelect.add(opt);
+        });
+    } catch (err) {
+        console.warn('Failed to load schedule from API, using fallback:', err);
+        raceSelect.innerHTML = '<option value="Bahrain">Bahrain Grand Prix</option>';
+    }
+}
+
+async function loadDriversFromAPI(year, gp, session) {
+    try {
+        const url = `${API_BASE}/api/drivers?year=${year}&gp=${encodeURIComponent(gp)}&session=${encodeURIComponent(session)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Drivers API failed');
+        const drivers = await resp.json();
+
+        if (drivers && drivers.length > 0) {
+            // Differentiate same-team colors
+            differentiateTeamColors(drivers);
+            state.cache.drivers = drivers;
+        } else {
+            state.cache.drivers = [...FALLBACK_DRIVERS];
+        }
+    } catch (err) {
+        console.warn('Failed to load drivers:', err);
+        state.cache.drivers = [...FALLBACK_DRIVERS];
+    }
+
+    populateDriverList();
 }
 
 function populateDriverList() {
     const list = document.getElementById('driver-list');
     list.innerHTML = '';
 
-    const drivers = state.cache.drivers || DRIVERS_2024;
+    const drivers = state.cache.drivers || FALLBACK_DRIVERS;
 
     drivers.forEach(driver => {
         const item = document.createElement('div');
@@ -140,24 +144,28 @@ function toggleDriver(driverCode) {
     // Update legend
     updateLegend();
 
-    // Update charts with cached data (no regeneration)
-    updateAllCharts();
+    // Update charts (load data for any new driver that may not be cached)
+    loadSelectedDriversData().then(() => {
+        updateAllCharts();
+    });
 }
 
 function setupEventListeners() {
     // Load Session button
     document.getElementById('load-data-btn').addEventListener('click', () => loadSession());
 
-    // Year change → refresh race list
+    // Year change → refresh schedule
     document.getElementById('year-select').addEventListener('change', () => {
-        populateRaceSelect();
+        loadSchedule();
     });
 
-    // Lap selector change
+    // Lap selector change → reload telemetry for selected lap
     document.getElementById('lap-select').addEventListener('change', (e) => {
         state.selectedLap = e.target.value;
-        updateTelemetryCharts();
-        updateLapInfo();
+        loadTelemetryForSelectedLap().then(() => {
+            updateTelemetryCharts();
+            updateLapInfo();
+        });
     });
 }
 
@@ -171,29 +179,44 @@ async function loadSession() {
     const session = document.getElementById('session-select').value;
     const cacheKey = `${year}-${race}-${session}`;
 
+    if (!race) return;
+
     // If same session, don't reload
     if (state.cache.key === cacheKey) return;
 
     showLoading(true);
     setBtnLoading(true);
 
-    // Try OpenF1 API first
-    let success = false;
-    try {
-        success = await loadFromAPI(year, race, session);
-    } catch (err) {
-        console.warn('OpenF1 API failed, using mock data:', err);
-    }
-
-    if (!success) {
-        loadMockData(year, race, session);
-        state.dataSource = 'mock';
-    } else {
-        state.dataSource = 'api';
-    }
-
+    // Reset cache
     state.cache.key = cacheKey;
+    state.cache.lapData = {};
+    state.cache.telemData = {};
     state.selectedLap = 'fastest';
+
+    try {
+        // 1. Load drivers
+        await loadDriversFromAPI(year, race, session);
+
+        // 2. Ensure selected drivers exist in the new list
+        const driverCodes = (state.cache.drivers || []).map(d => d.code);
+        state.selectedDrivers = state.selectedDrivers.filter(c => driverCodes.includes(c));
+        if (state.selectedDrivers.length === 0 && driverCodes.length > 0) {
+            state.selectedDrivers = driverCodes.slice(0, 2);
+        }
+        // Refresh driver list selection UI
+        document.querySelectorAll('.driver-item').forEach(el => {
+            el.classList.toggle('selected', state.selectedDrivers.includes(el.dataset.driver));
+        });
+
+        // 3. Load lap data + telemetry for selected drivers
+        await loadSelectedDriversData();
+
+        state.dataSource = 'api';
+    } catch (err) {
+        console.error('Session load failed:', err);
+        state.dataSource = 'mock';
+        loadMockData();
+    }
 
     // Populate lap selector
     populateLapSelector();
@@ -205,190 +228,157 @@ async function loadSession() {
     setBtnLoading(false);
 }
 
-async function loadFromAPI(year, race, session) {
-    // Step 1: Find the session key
-    const sessionsUrl = `https://api.openf1.org/v1/sessions?year=${year}&session_name=${encodeURIComponent(session)}&country_name=${encodeURIComponent(getCountryFromRace(race))}`;
-    const sessionsResp = await fetch(sessionsUrl);
-    if (!sessionsResp.ok) throw new Error('Sessions API failed');
+async function loadSelectedDriversData() {
+    const year = document.getElementById('year-select').value;
+    const race = document.getElementById('race-select').value;
+    const session = document.getElementById('session-select').value;
 
-    const sessions = await sessionsResp.json();
-    if (!sessions || sessions.length === 0) throw new Error('No session found');
+    const promises = state.selectedDrivers.map(async (code) => {
+        // Load laps if not cached
+        if (!state.cache.lapData[code]) {
+            await loadDriverLaps(year, race, session, code);
+        }
+        // Load telemetry if not cached
+        if (!state.cache.telemData[code]) {
+            await loadDriverTelemetry(year, race, session, code, state.selectedLap);
+        }
+    });
 
-    const sessionData = sessions[0];
-    state.sessionKey = sessionData.session_key;
-
-    // Step 2: Get drivers for this session
-    const driversUrl = `https://api.openf1.org/v1/drivers?session_key=${state.sessionKey}`;
-    const driversResp = await fetch(driversUrl);
-    const apiDrivers = await driversResp.json();
-
-    if (apiDrivers && apiDrivers.length > 0) {
-        state.cache.drivers = apiDrivers.map(d => ({
-            code: d.name_acronym || d.driver_number?.toString(),
-            name: d.full_name || `${d.first_name} ${d.last_name}`,
-            team: d.team_name || 'Unknown',
-            color: '#' + (d.team_colour || '888888'),
-            number: d.driver_number
-        }));
-
-        // Ensure distinct colors for same-team drivers
-        differentiateTeamColors(state.cache.drivers);
-        populateDriverList();
-    }
-
-    // Step 3: Load lap data for selected drivers
-    for (const code of state.selectedDrivers) {
-        await loadDriverLapsFromAPI(code);
-    }
-
-    return true;
+    await Promise.all(promises);
 }
 
-async function loadDriverLapsFromAPI(driverCode) {
-    if (!state.sessionKey) return;
-
-    const driver = (state.cache.drivers || DRIVERS_2024).find(d => d.code === driverCode);
-    if (!driver) return;
-
-    const driverNum = driver.number;
-    if (!driverNum) {
-        // Fallback: generate mock data for this driver
-        state.cache.lapData[driverCode] = generateLapData(driver);
-        state.cache.telemData[driverCode] = generateTelemetry(driver);
-        return;
-    }
-
+async function loadDriverLaps(year, race, session, driverCode) {
     try {
-        // Lap times
-        const lapsUrl = `https://api.openf1.org/v1/laps?session_key=${state.sessionKey}&driver_number=${driverNum}`;
-        const lapsResp = await fetch(lapsUrl);
-        const laps = await lapsResp.json();
+        const url = `${API_BASE}/api/laps?year=${year}&gp=${encodeURIComponent(race)}&session=${encodeURIComponent(session)}&driver=${driverCode}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Laps API failed for ${driverCode}`);
+        const laps = await resp.json();
 
         if (laps && laps.length > 0) {
             state.cache.lapData[driverCode] = laps.map(l => ({
-                x: l.lap_number,
-                y: l.lap_duration || 0,
+                x: l.lap,
+                y: l.time,
                 driver: driverCode,
-                isPit: l.is_pit_out_lap || false,
-                sector1: l.duration_sector_1,
-                sector2: l.duration_sector_2,
-                sector3: l.duration_sector_3
-            })).filter(l => l.y > 0 && l.y < 200); // Filter out invalid laps
-        } else {
-            state.cache.lapData[driverCode] = generateLapData(driver);
-        }
-
-        // Telemetry (car data) – this can be very large, so we sample
-        const telemUrl = `https://api.openf1.org/v1/car_data?session_key=${state.sessionKey}&driver_number=${driverNum}&speed>=0`;
-        const telemResp = await fetch(telemUrl);
-        const telem = await telemResp.json();
-
-        if (telem && telem.length > 50) {
-            // Sample every Nth point to keep it manageable
-            const step = Math.max(1, Math.floor(telem.length / 300));
-            const sampled = telem.filter((_, i) => i % step === 0);
-            state.cache.telemData[driverCode] = sampled.map((t, i) => ({
-                x: i,
-                speed: t.speed || 0,
-                throttle: t.throttle || 0,
-                brake: t.brake || 0,
-                gear: t.n_gear || 0,
-                rpm: t.rpm || 0
+                tire: l.compound || '',
+                isPit: l.isPit || false,
+                sector1: l.sector1,
+                sector2: l.sector2,
+                sector3: l.sector3,
             }));
         } else {
-            state.cache.telemData[driverCode] = generateTelemetry(driver);
+            state.cache.lapData[driverCode] = generateLapData(driverCode);
         }
     } catch (err) {
-        console.warn(`Failed to load data for ${driverCode}:`, err);
-        state.cache.lapData[driverCode] = generateLapData(driver);
-        state.cache.telemData[driverCode] = generateTelemetry(driver);
+        console.warn(`Lap data failed for ${driverCode}:`, err);
+        state.cache.lapData[driverCode] = generateLapData(driverCode);
     }
 }
 
-function loadMockData(year, race, session) {
-    state.cache.drivers = [...DRIVERS_2024];
-    state.cache.lapData = {};
+async function loadDriverTelemetry(year, race, session, driverCode, lap) {
+    try {
+        const lapParam = lap === 'fastest' ? 'fastest' : lap;
+        const url = `${API_BASE}/api/telemetry?year=${year}&gp=${encodeURIComponent(race)}&session=${encodeURIComponent(session)}&driver=${driverCode}&lap=${lapParam}`;
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Telemetry API failed for ${driverCode}`);
+        const telem = await resp.json();
+
+        if (telem && telem.length > 0) {
+            state.cache.telemData[driverCode] = telem.map(t => ({
+                x: t.distance,
+                speed: t.speed,
+                throttle: t.throttle,
+                brake: t.brake * 100,  // convert 0/1 to 0/100 for chart
+                gear: t.gear,
+                rpm: t.rpm,
+            }));
+        } else {
+            state.cache.telemData[driverCode] = generateTelemetry(driverCode);
+        }
+    } catch (err) {
+        console.warn(`Telemetry failed for ${driverCode}:`, err);
+        state.cache.telemData[driverCode] = generateTelemetry(driverCode);
+    }
+}
+
+async function loadTelemetryForSelectedLap() {
+    const year = document.getElementById('year-select').value;
+    const race = document.getElementById('race-select').value;
+    const session = document.getElementById('session-select').value;
+
+    // Clear telemetry cache and reload for new lap
     state.cache.telemData = {};
 
-    const drivers = state.cache.drivers;
-    drivers.forEach(driver => {
-        state.cache.lapData[driver.code] = generateLapData(driver);
-        state.cache.telemData[driver.code] = generateTelemetry(driver);
-    });
-
-    populateDriverList();
+    const promises = state.selectedDrivers.map(code =>
+        loadDriverTelemetry(year, race, session, code, state.selectedLap)
+    );
+    await Promise.all(promises);
 }
 
 // ============================================================
 //  MOCK DATA GENERATORS (fallback)
 // ============================================================
 
-function generateLapData(driver, laps = 55) {
-    const data = [];
-    // Base time varies by driver skill
-    const driverIdx = DRIVERS_2024.findIndex(d => d.code === driver.code);
-    let baseTime = 88 + (driverIdx >= 0 ? driverIdx * 0.08 : Math.random());
+function loadMockData() {
+    state.cache.drivers = [...FALLBACK_DRIVERS];
+    state.cache.lapData = {};
+    state.cache.telemData = {};
 
-    let currentTire = 'S';
+    FALLBACK_DRIVERS.forEach(d => {
+        state.cache.lapData[d.code] = generateLapData(d.code);
+        state.cache.telemData[d.code] = generateTelemetry(d.code);
+    });
+
+    populateDriverList();
+}
+
+function generateLapData(driverCode, laps = 55) {
+    const data = [];
+    const driverIdx = (state.cache.drivers || FALLBACK_DRIVERS).findIndex(d => d.code === driverCode);
+    let baseTime = 88 + (driverIdx >= 0 ? driverIdx * 0.08 : Math.random());
+    let currentTire = 'SOFT';
     let tireAge = 0;
 
     for (let i = 1; i <= laps; i++) {
         tireAge++;
-
-        // Pit stop
         if (tireAge > 14 + Math.floor(Math.random() * 6)) {
-            currentTire = currentTire === 'S' ? 'M' : (currentTire === 'M' ? 'H' : 'S');
+            currentTire = currentTire === 'SOFT' ? 'MEDIUM' : 'HARD';
             tireAge = 0;
-            data.push({ x: i, y: baseTime + 18 + Math.random() * 4, tire: currentTire, driver: driver.code, isPit: true });
+            data.push({ x: i, y: baseTime + 18 + Math.random() * 4, tire: currentTire, driver: driverCode, isPit: true });
             continue;
         }
-
-        // Degradation + variance
         let time = baseTime + (tireAge * 0.08) + (Math.random() * 0.6 - 0.3);
-
-        // Tire performance offset
-        if (currentTire === 'S') time -= 0.3;
-        if (currentTire === 'H') time += 0.2;
-
-        data.push({ x: i, y: time, tire: currentTire, driver: driver.code });
+        if (currentTire === 'SOFT') time -= 0.3;
+        if (currentTire === 'HARD') time += 0.2;
+        data.push({ x: i, y: time, tire: currentTire, driver: driverCode });
     }
     return data;
 }
 
-function generateTelemetry(driver, length = 300) {
+function generateTelemetry(driverCode, length = 300) {
     const data = [];
-    let speed = 200;
-    let throttle = 80;
-    let brake = 0;
-    let gear = 5;
-
-    const seed = (DRIVERS_2024.findIndex(d => d.code === driver.code) + 1) * 7;
+    let speed = 200, throttle = 80, brake = 0, gear = 5;
+    const idx = (state.cache.drivers || FALLBACK_DRIVERS).findIndex(d => d.code === driverCode);
+    const seed = (idx + 1) * 7;
 
     for (let i = 0; i < length; i++) {
         const phase = (i + seed) % 60;
-
         if (phase < 35) {
-            // Straight / accelerating
             throttle = Math.min(100, 60 + phase * 1.5 + (Math.random() - 0.5) * 5);
             brake = 0;
             speed += throttle * 0.03 - 0.5;
             gear = speed > 280 ? 8 : speed > 230 ? 7 : speed > 180 ? 6 : speed > 130 ? 5 : 4;
         } else if (phase < 45) {
-            // Braking zone
             throttle = 0;
             brake = Math.min(100, 40 + (phase - 35) * 8);
             speed -= brake * 0.15;
             gear = speed > 200 ? 6 : speed > 150 ? 5 : speed > 100 ? 4 : 3;
         } else {
-            // Corner / low speed
             throttle = Math.min(60, 10 + (phase - 45) * 4);
             brake = Math.max(0, 30 - (phase - 45) * 3);
             speed += (throttle - brake) * 0.05;
             gear = speed > 160 ? 5 : speed > 120 ? 4 : 3;
         }
-
         speed = Math.max(60, Math.min(340, speed + (Math.random() - 0.5) * 3));
-
         data.push({
             x: i * 15,
             speed: Math.round(speed),
@@ -450,7 +440,7 @@ function initCharts() {
         animation: { duration: 400 }
     };
 
-    // 1. Lap Analysis Chart (Scatter)
+    // 1. Lap Analysis Chart (Scatter with lines)
     const ctxLap = document.getElementById('lapChart').getContext('2d');
     lapChart = new Chart(ctxLap, {
         type: 'scatter',
@@ -498,13 +488,14 @@ function initCharts() {
                     const point = lapChart.data.datasets[dsIdx].data[idx];
                     const lapNum = point.x;
 
-                    // Set selected lap in dropdown
                     const lapSelect = document.getElementById('lap-select');
                     lapSelect.value = lapNum.toString();
                     state.selectedLap = lapNum.toString();
 
-                    updateTelemetryCharts();
-                    updateLapInfo();
+                    loadTelemetryForSelectedLap().then(() => {
+                        updateTelemetryCharts();
+                        updateLapInfo();
+                    });
                 }
             }
         }
@@ -524,6 +515,14 @@ function initCharts() {
                         label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y} km/h`
                     }
                 }
+            },
+            scales: {
+                x: {
+                    type: 'linear', display: true,
+                    title: { display: true, text: 'Distance (m)', color: '#50506a', font: { size: 10 } },
+                    grid: { color: '#1f1f35', lineWidth: 0.5 }
+                },
+                y: { grid: { color: '#1f1f35', lineWidth: 0.5 } }
             }
         }
     });
@@ -533,7 +532,10 @@ function initCharts() {
         type: 'line', data: { datasets: [] },
         options: {
             ...commonLineOptions,
-            scales: { ...commonLineOptions.scales, y: { ...commonLineOptions.scales.y, min: 0, max: 105 } }
+            scales: {
+                ...commonLineOptions.scales,
+                y: { ...commonLineOptions.scales.y, min: 0, max: 105 }
+            }
         }
     });
 
@@ -542,7 +544,10 @@ function initCharts() {
         type: 'line', data: { datasets: [] },
         options: {
             ...commonLineOptions,
-            scales: { ...commonLineOptions.scales, y: { ...commonLineOptions.scales.y, min: 0, max: 105 } }
+            scales: {
+                ...commonLineOptions.scales,
+                y: { ...commonLineOptions.scales.y, min: 0, max: 105 }
+            }
         }
     });
 
@@ -570,15 +575,14 @@ function updateAllCharts() {
 }
 
 function updateLapChart() {
-    const drivers = state.cache.drivers || DRIVERS_2024;
+    const drivers = state.cache.drivers || FALLBACK_DRIVERS;
 
     const datasets = state.selectedDrivers.map(code => {
         const driver = drivers.find(d => d.code === code);
         if (!driver) return null;
 
-        // Ensure data exists in cache
         if (!state.cache.lapData[code]) {
-            state.cache.lapData[code] = generateLapData(driver);
+            state.cache.lapData[code] = generateLapData(code);
         }
         const lapData = state.cache.lapData[code];
 
@@ -587,11 +591,17 @@ function updateLapChart() {
             data: lapData,
             backgroundColor: driver.color,
             borderColor: driver.color,
-            pointRadius: 4,
+            // --- LINE CONNECTING POINTS ---
+            showLine: true,
+            borderWidth: 2,
+            tension: 0.3,
+            // --- POINT STYLE ---
+            pointRadius: 3,
             pointHoverRadius: 7,
             pointBorderWidth: 0,
             pointHoverBorderWidth: 2,
-            pointHoverBorderColor: '#fff'
+            pointHoverBorderColor: '#fff',
+            fill: false,
         };
     }).filter(Boolean);
 
@@ -600,7 +610,7 @@ function updateLapChart() {
 }
 
 function updateTelemetryCharts() {
-    const drivers = state.cache.drivers || DRIVERS_2024;
+    const drivers = state.cache.drivers || FALLBACK_DRIVERS;
     const datasetsSpeed = [];
     const datasetsThrottle = [];
     const datasetsBrake = [];
@@ -610,9 +620,8 @@ function updateTelemetryCharts() {
         const driver = drivers.find(d => d.code === code);
         if (!driver) return;
 
-        // Ensure telemetry exists in cache
         if (!state.cache.telemData[code]) {
-            state.cache.telemData[code] = generateTelemetry(driver);
+            state.cache.telemData[code] = generateTelemetry(code);
         }
         const telemData = state.cache.telemData[code];
 
@@ -654,7 +663,7 @@ function updateTelemetryCharts() {
 
 function updateLegend() {
     const legend = document.getElementById('lap-legend');
-    const drivers = state.cache.drivers || DRIVERS_2024;
+    const drivers = state.cache.drivers || FALLBACK_DRIVERS;
     legend.innerHTML = '';
 
     state.selectedDrivers.forEach(code => {
@@ -671,7 +680,6 @@ function populateLapSelector() {
     const select = document.getElementById('lap-select');
     select.innerHTML = '<option value="fastest">Fastest Lap</option>';
 
-    // Determine max laps from cached data
     let maxLaps = 0;
     Object.values(state.cache.lapData).forEach(laps => {
         if (laps && laps.length > maxLaps) maxLaps = laps.length;
@@ -733,36 +741,6 @@ function formatLapTime(seconds) {
     return `${mins}:${secs.toFixed(3).padStart(6, '0')}`;
 }
 
-function getCountryFromRace(raceName) {
-    const map = {
-        'Bahrain Grand Prix': 'Bahrain',
-        'Saudi Arabian Grand Prix': 'Saudi Arabia',
-        'Australian Grand Prix': 'Australia',
-        'Japanese Grand Prix': 'Japan',
-        'Chinese Grand Prix': 'China',
-        'Miami Grand Prix': 'United States',
-        'Emilia Romagna Grand Prix': 'Italy',
-        'Monaco Grand Prix': 'Monaco',
-        'Canadian Grand Prix': 'Canada',
-        'Spanish Grand Prix': 'Spain',
-        'Austrian Grand Prix': 'Austria',
-        'British Grand Prix': 'United Kingdom',
-        'Hungarian Grand Prix': 'Hungary',
-        'Belgian Grand Prix': 'Belgium',
-        'Dutch Grand Prix': 'Netherlands',
-        'Italian Grand Prix': 'Italy',
-        'Azerbaijan Grand Prix': 'Azerbaijan',
-        'Singapore Grand Prix': 'Singapore',
-        'United States Grand Prix': 'United States',
-        'Mexico City Grand Prix': 'Mexico',
-        'São Paulo Grand Prix': 'Brazil',
-        'Las Vegas Grand Prix': 'United States',
-        'Qatar Grand Prix': 'Qatar',
-        'Abu Dhabi Grand Prix': 'United Arab Emirates'
-    };
-    return map[raceName] || raceName.replace(' Grand Prix', '');
-}
-
 function differentiateTeamColors(drivers) {
     const teamCount = {};
     drivers.forEach(d => {
@@ -773,7 +751,6 @@ function differentiateTeamColors(drivers) {
 
     Object.values(teamCount).forEach(teamDrivers => {
         if (teamDrivers.length > 1) {
-            // Lighten color for the 2nd driver
             for (let i = 1; i < teamDrivers.length; i++) {
                 teamDrivers[i].color = lightenColor(teamDrivers[0].color, 30 + i * 15);
             }
